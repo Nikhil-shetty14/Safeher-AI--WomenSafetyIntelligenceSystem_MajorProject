@@ -1,0 +1,33 @@
+# Node dependencies
+node_modules/
+.npm/
+
+# Expo / Mobile
+.expo/
+dist/
+web-build/
+ios/
+android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log

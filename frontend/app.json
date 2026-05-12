@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "SafeHer AI",
+    "slug": "safeher-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0A1E"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.safeher.ai",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "SafeHer AI needs location access to share your position with emergency contacts during an SOS alert.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SafeHer AI needs background location for continuous safety monitoring.",
+        "NSMicrophoneUsageDescription": "SafeHer AI needs microphone access for voice SOS and stress analysis.",
+        "NSCameraUsageDescription": "SafeHer AI needs camera access for profile photo."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F0A1E"
+      },
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.safeher.ai",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "RECORD_AUDIO",
+        "CAMERA",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-location",
+      "expo-notifications",
+      [
+        "expo-camera",
+        { "cameraPermission": "Allow SafeHer AI to access your camera." }
+      ]
+    ],
+    "extra": {
+      "eas": { "projectId": "safeher-ai-project" }
+    }
+  }
+}
