@@ -7,7 +7,7 @@ import os
 from app.core.config import settings
 from app.core.database import connect_db, close_db
 from app.websockets.socket_manager import sio
-from app.api.routes import auth, sos, contacts, ai, location, admin
+from app.api.routes import auth, sos, contacts, ai, location, admin, profile
 from loguru import logger
 
 # Configure loguru
@@ -38,6 +38,7 @@ app.include_router(contacts.router)
 app.include_router(ai.router)
 app.include_router(location.router)
 app.include_router(admin.router)
+app.include_router(profile.router)
 
 # Static files (audio uploads)
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

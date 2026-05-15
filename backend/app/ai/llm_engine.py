@@ -154,6 +154,51 @@ async def analyze_text_for_danger(text: str, location: Optional[dict] = None) ->
         return _mock_danger_analysis(text)
 
 
+async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, location: dict = None) -> dict:
+    """
+    Perform deep intelligence analysis on transcribed emergency audio and acoustic metadata.
+    """
+    if not settings.OPENAI_API_KEY:
+        return _mock_danger_analysis(transcript)
+
+    try:
+        prompt = f"""
+        TRANSCRIPT: "{transcript}"
+        ACOUSTIC DATA: {json.dumps(acoustic_data)}
+        LOCATION: {json.dumps(location) if location else "Unknown"}
+        
+        Analyze the above emergency data. Consider both the content of the speech and the emotional tone from acoustics.
+        Generate a tactical risk assessment for the SafeHer AI Admin Dashboard.
+        
+        Return JSON format:
+        {{
+          "danger_level": "LOW/MEDIUM/HIGH/CRITICAL",
+          "risk_score": 0-100,
+          "detected_emotions": ["list"],
+          "detected_threats": ["list"],
+          "ai_tactical_summary": "detailed summary of what is happening",
+          "recommendations": ["immediate actions for responders"],
+          "confidence_score": 0.0-1.0,
+          "trigger_emergency_protocol": true/false
+        }}
+        """
+
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a Tactical Emergency Intelligence Engine."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        logger.error(f"Audio Intelligence analysis failed: {e}")
+        return _mock_danger_analysis(transcript)
+
+
 async def chat_with_safeher(message: str, history: list = None) -> dict:
     """AI safety chatbot conversation."""
     if not settings.OPENAI_API_KEY:

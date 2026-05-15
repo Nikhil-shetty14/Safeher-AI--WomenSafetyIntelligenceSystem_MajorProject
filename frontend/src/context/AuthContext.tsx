@@ -9,6 +9,15 @@ interface User {
   phone: string;
   role: string;
   profile_image?: string;
+  age?: number;
+  gender?: string;
+  address?: string;
+  blood_group?: string;
+  medical_conditions?: string;
+  allergies?: string;
+  safety_preferences?: any;
+  notification_settings?: any;
+  security_settings?: any;
 }
 
 interface AuthContextType {
@@ -75,8 +84,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  const updateUser = useCallback((data: Partial<User>) => {
-    setUser((prev) => prev ? { ...prev, ...data } : null);
+  const updateUser = useCallback(async (data: Partial<User>) => {
+    setUser((prev) => {
+      const updated = prev ? { ...prev, ...data } : null;
+      if (updated) {
+        AsyncStorage.setItem('safeher_user', JSON.stringify(updated));
+      }
+      return updated;
+    });
   }, []);
 
   return (

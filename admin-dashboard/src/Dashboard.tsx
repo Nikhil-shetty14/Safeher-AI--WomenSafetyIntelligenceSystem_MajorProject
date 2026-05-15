@@ -44,9 +44,24 @@ export default function Dashboard() {
   const { socket } = useSocket();
   const [logs, setLogs] = useState<any[]>([]);
 
+  const [tacticalIntel, setTacticalIntel] = useState<any>(null);
+
   useEffect(() => {
     if (!socket) return;
     
+    socket.on('tactical_intel_update', (intel) => {
+      setTacticalIntel(intel);
+      // Also add to logs
+      const log = {
+        id: Math.random().toString(36).substr(2, 9),
+        time: new Date().toLocaleTimeString(),
+        type: 'TACTICAL_INTEL',
+        message: `Intelligence update for ${intel.user_name}`,
+        data: intel
+      };
+      setLogs(prev => [log, ...prev].slice(0, 20));
+    });
+
     const handler = (data: any, type: string) => {
       const log = {
         id: Math.random().toString(36).substr(2, 9),
@@ -63,6 +78,7 @@ export default function Dashboard() {
     socket.on('ai_prediction', (d) => handler(d, 'AI_INTEL'));
 
     return () => {
+      socket.off('tactical_intel_update');
       socket.off('new_sos_alert');
       socket.off('user_location_update');
       socket.off('ai_prediction');
@@ -79,7 +95,6 @@ export default function Dashboard() {
       setStats(statsRes.data);
       setAlerts(alertsRes.data || []);
       
-      // Transform trends for chart
       const chartData = (trendsRes.data || []).map((t: any) => {
         const high = t.levels.high || 0;
         const medium = t.levels.medium || 0;
@@ -91,7 +106,6 @@ export default function Dashboard() {
         };
       });
       setTrends(chartData.length > 0 ? chartData : mockTrends);
-      
       setLastRefresh(new Date());
       setError(null);
     } catch (e: any) {
@@ -103,7 +117,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000); // Faster refresh for command center
+    const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
 
@@ -269,33 +283,69 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Media & Transcript */}
+        {/* Media & Tactical Intelligence Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="glass-card" style={{ padding: '24px' }}>
+          <div className="glass-card" style={{ padding: '24px', border: tacticalIntel ? '1px solid #a78bfa' : '1px solid #1e293b' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-              <MessageSquare size={18} color="#8b5cf6" /> Audio Evidence Analysis
+              <Shield size={18} color="#a78bfa" /> Tactical Intel: {tacticalIntel?.user_name || 'N/A'}
             </h3>
-            <div style={{ padding: '16px', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px dashed #334155' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                <PlayCircle size={32} color="#8b5cf6" style={{ cursor: 'pointer' }} />
-                <div style={{ flex: 1, height: '2px', background: 'rgba(255,255,255,0.1)' }}>
-                  <div style={{ width: '40%', height: '100%', background: '#8b5cf6' }} />
+            
+            {tacticalIntel ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ padding: '16px', background: 'rgba(167, 139, 250, 0.05)', borderRadius: '12px', border: '1px solid rgba(167, 139, 250, 0.2)' }}>
+                  <p style={{ color: '#a78bfa', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>AI Transcript</p>
+                  <p style={{ fontSize: '14px', color: '#f8f4ff', fontStyle: 'italic', lineHeight: 1.5 }}>
+                    "{tacticalIntel.transcript || "No speech detected..."}"
+                  </p>
                 </div>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>00:14 / 00:32</span>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                   <div className="glass-card" style={{ padding: '12px', textAlign: 'center' }}>
+                      <p style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Risk Score</p>
+                      <p style={{ fontSize: '20px', fontWeight: 800, color: tacticalIntel.intelligence.risk_score > 70 ? '#ef4444' : '#f59e0b' }}>
+                        {tacticalIntel.intelligence.risk_score}%
+                      </p>
+                   </div>
+                   <div className="glass-card" style={{ padding: '12px', textAlign: 'center' }}>
+                      <p style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Danger Level</p>
+                      <p style={{ fontSize: '16px', fontWeight: 700, color: '#ef4444' }}>{tacticalIntel.intelligence.danger_level}</p>
+                   </div>
+                </div>
+
+                <div>
+                   <p style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Tactical Summary</p>
+                   <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.4 }}>{tacticalIntel.intelligence.ai_tactical_summary}</p>
+                </div>
+
+                <div>
+                   <p style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Recommended Actions</p>
+                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {tacticalIntel.intelligence.recommendations.map((r: string, i: number) => (
+                        <span key={i} style={{ fontSize: '11px', padding: '4px 8px', background: '#8b5cf620', color: '#a78bfa', borderRadius: '4px', border: '1px solid #8b5cf630' }}>{r}</span>
+                      ))}
+                   </div>
+                </div>
+
+                <div style={{ marginTop: '8px' }}>
+                  <audio controls style={{ width: '100%', height: '32px' }}>
+                    <source src={`${adminAPI.defaults.baseURL}/api/sos/audio/${tacticalIntel.alert_id}`} type="audio/wav" />
+                  </audio>
+                </div>
               </div>
-              <p style={{ color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', marginBottom: '8px' }}>AI Transcript</p>
-              <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.5, fontStyle: 'italic' }}>
-                "Help! I think someone is following me... I'm near the parking lot. Please hurry!"
-              </p>
-            </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#475569' }}>
+                 <Activity size={32} style={{ marginBottom: '12px', opacity: 0.3 }} />
+                 <p style={{ fontSize: '13px' }}>Waiting for tactical intelligence feed...</p>
+              </div>
+            )}
           </div>
 
           {/* Tactical Intel Feed */}
           <div className="glass-card" style={{ flex: 1, padding: '24px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(139,92,246,0.1)' }}>
             <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-               <Shield size={16} /> LIVE TACTICAL INTEL
+               <Shield size={16} /> SYSTEM LIVE LOGS
             </h3>
-            <div style={{ height: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ height: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {logs.length === 0 ? (
                 <p style={{ fontSize: '12px', color: '#475569', fontStyle: 'italic' }}>Awaiting live intelligence feed...</p>
               ) : (

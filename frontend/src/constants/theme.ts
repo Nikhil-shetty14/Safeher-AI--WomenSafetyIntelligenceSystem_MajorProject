@@ -35,10 +35,10 @@ export const Colors = {
   textMuted: '#6B5A8A',
 
   // Gradients (as arrays for LinearGradient)
-  gradientPrimary: ['#8B5CF6', '#EC4899'],
-  gradientDanger: ['#EF4444', '#B91C1C'],
-  gradientCard: ['#1E1535', '#2D2050'],
-  gradientBg: ['#0F0A1E', '#1A1033'],
+  gradientPrimary: ['#8B5CF6', '#EC4899'] as const,
+  gradientDanger: ['#EF4444', '#B91C1C'] as const,
+  gradientCard: ['#1E1535', '#2D2050'] as const,
+  gradientBg: ['#0F0A1E', '#1A1033'] as const,
 
   // SOS Severity
   severitySafe: '#10B981',

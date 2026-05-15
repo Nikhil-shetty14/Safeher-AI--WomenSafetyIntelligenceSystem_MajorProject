@@ -3,197 +3,161 @@ import tempfile
 import numpy as np
 from loguru import logger
 from app.models.ai_prediction import DangerLevel
-from typing import Optional
+from typing import Optional, Dict, Any
+from pydub import AudioSegment
 
-# Try to import whisper; degrade gracefully if not installed
+# 🛡️ Robust Dependency Handling
 try:
+    import torch
     import whisper
-    WHISPER_AVAILABLE = True
-    _whisper_model = None
+    AI_AVAILABLE = True
+    logger.info("AI Dependencies (Torch/Whisper) loaded successfully.")
 except ImportError:
-    WHISPER_AVAILABLE = False
-    logger.warning("Whisper not installed. Voice analysis will use mock mode.")
+    AI_AVAILABLE = False
+    logger.error("CRITICAL: PyTorch or Whisper not installed. Voice analysis will be disabled.")
 
-# Try librosa for audio feature extraction
 try:
     import librosa
     LIBROSA_AVAILABLE = True
 except ImportError:
     LIBROSA_AVAILABLE = False
+    logger.warning("Librosa not installed. Advanced acoustic analysis disabled.")
 
+# Load whisper model globally (lazy load)
+_whisper_model = None
 
-def _load_whisper_model():
+def get_whisper_model():
     global _whisper_model
-    if not WHISPER_AVAILABLE:
+    if not AI_AVAILABLE:
         return None
     if _whisper_model is None:
         try:
-            _whisper_model = whisper.load_model("base")
-            logger.info("Whisper model loaded successfully")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            # Using 'base' model for speed/accuracy balance
+            _whisper_model = whisper.load_model("base", device=device)
+            logger.info(f"Whisper model loaded on {device}")
         except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
+            logger.error(f"Whisper initialization failed: {e}")
     return _whisper_model
 
 
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    logger.warning("Librosa not installed. Advanced acoustic analysis disabled.")
+
+
 async def transcribe_audio(audio_file_path: str) -> Optional[str]:
-    """Transcribe audio using Whisper."""
-    model = _load_whisper_model()
+    """Transcribe audio using OpenAI Whisper."""
+    if not AI_AVAILABLE:
+        return "Audio transcription service disabled (missing dependencies)."
+    
+    model = get_whisper_model()
     if not model:
-        return "Audio transcription not available (Whisper not installed)"
+        return "Audio transcription service unavailable."
 
     try:
-        result = model.transcribe(audio_file_path, language="en", task="transcribe")
-        transcript = result["text"].strip()
-        logger.info(f"Transcribed: {transcript[:100]}...")
+        # Convert to WAV if needed (Whisper handles many formats but pydub can normalize)
+        if not audio_file_path.endswith(".wav"):
+            audio = AudioSegment.from_file(audio_file_path)
+            temp_wav = audio_file_path + ".normalized.wav"
+            audio.export(temp_wav, format="wav")
+            audio_file_path = temp_wav
+
+        result = model.transcribe(audio_file_path, fp16=False)
+        transcript = result.get("text", "").strip()
+        
+        # Cleanup temp file if created
+        if ".normalized.wav" in audio_file_path:
+            os.remove(audio_file_path)
+            
+        logger.info(f"Audio Transcribed: {len(transcript)} chars")
         return transcript
     except Exception as e:
-        logger.error(f"Transcription failed: {e}")
+        logger.error(f"Transcription error: {e}")
         return None
 
 
-async def analyze_voice_stress(audio_file_path: str) -> dict:
+async def analyze_voice_stress(audio_file_path: str) -> Dict[str, Any]:
     """
-    Analyze audio for stress/fear indicators using acoustic features.
-    Returns stress level (0-1), emotion classification, and danger assessment.
+    Perform deep acoustic analysis to detect panic, stress, and environmental danger.
     """
     if not LIBROSA_AVAILABLE:
-        return _mock_voice_analysis()
+        return _get_default_analysis()
 
     try:
-        # Load audio
-        y, sr = librosa.load(audio_file_path, sr=22050, duration=30)
+        # Load audio (downsample for analysis speed)
+        y, sr = librosa.load(audio_file_path, sr=16000, duration=30)
+        
+        # 1. Pitch & Jitter (Emotional Distress)
+        pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+        pitch = np.mean(pitches[pitches > 0]) if np.any(pitches > 0) else 0
+        
+        # 2. Energy/Volume (Aggression/Screams)
+        rms = librosa.feature.rms(y=y)[0]
+        energy = np.mean(rms)
+        energy_max = np.max(rms)
+        
+        # 3. Speech Rate (Panic)
+        zcr = librosa.feature.zero_crossing_rate(y)[0]
+        speech_rate = np.mean(zcr)
+        
+        # 4. Mel-Frequency Cepstral Coefficients (Tone/Timbre)
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_mean = np.mean(mfcc, axis=1)
 
-        # Extract acoustic features
-        features = _extract_audio_features(y, sr)
-        stress_level = _calculate_stress_level(features)
-        emotion = _classify_emotion(features)
-        danger_level = _assess_danger_from_voice(stress_level, features)
+        # Classification logic
+        stress_score = 0.0
+        emotion = "neutral"
+        
+        # Normalize and weight features
+        # High pitch + High energy = Fear/Scream
+        if pitch > 250 and energy > 0.05:
+            stress_score = 0.9
+            emotion = "fear/scream"
+        elif speech_rate > 0.2:
+            stress_score = 0.75
+            emotion = "panic/rapid_speech"
+        elif energy > 0.08:
+            stress_score = 0.8
+            emotion = "aggression/loud_noise"
+        elif energy < 0.005:
+            stress_score = 0.2
+            emotion = "whispering/muffled"
+        else:
+            stress_score = 0.4
+            emotion = "agitated"
+
+        danger_level = "low"
+        if stress_score > 0.85: danger_level = "critical"
+        elif stress_score > 0.7: danger_level = "high"
+        elif stress_score > 0.4: danger_level = "medium"
 
         return {
-            "stress_level": stress_level,
+            "stress_score": float(stress_score),
             "emotion": emotion,
             "danger_level": danger_level,
-            "confidence": 0.75,
-            "trigger_emergency": stress_level > 0.7 or danger_level in ["high", "critical"],
-            "features": {
-                "pitch_mean": float(features.get("pitch_mean", 0)),
-                "pitch_std": float(features.get("pitch_std", 0)),
-                "energy_rms": float(features.get("energy_rms", 0)),
-                "speech_rate": float(features.get("speech_rate", 0)),
-            }
+            "acoustic_features": {
+                "pitch_hz": float(pitch),
+                "energy_rms": float(energy),
+                "peak_energy": float(energy_max),
+                "speech_activity": float(speech_rate)
+            },
+            "trigger_emergency": stress_score > 0.75
         }
 
     except Exception as e:
-        logger.error(f"Voice stress analysis failed: {e}")
-        return _mock_voice_analysis()
+        logger.error(f"Acoustic analysis failed: {e}")
+        return _get_default_analysis()
 
 
-def _extract_audio_features(y: np.ndarray, sr: int) -> dict:
-    """Extract acoustic features from audio signal."""
-    features = {}
-
-    # Pitch / F0 analysis
-    try:
-        f0, voiced_flag, voiced_prob = librosa.pyin(
-            y, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7')
-        )
-        valid_f0 = f0[voiced_flag]
-        features["pitch_mean"] = np.mean(valid_f0) if len(valid_f0) > 0 else 0
-        features["pitch_std"] = np.std(valid_f0) if len(valid_f0) > 0 else 0
-        features["pitch_range"] = (np.max(valid_f0) - np.min(valid_f0)) if len(valid_f0) > 0 else 0
-    except Exception:
-        features["pitch_mean"] = 0
-        features["pitch_std"] = 0
-        features["pitch_range"] = 0
-
-    # Energy / RMS
-    rms = librosa.feature.rms(y=y)
-    features["energy_rms"] = float(np.mean(rms))
-    features["energy_std"] = float(np.std(rms))
-
-    # MFCCs (vocal quality)
-    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-    features["mfcc_mean"] = float(np.mean(mfccs))
-    features["mfcc_std"] = float(np.std(mfccs))
-
-    # Zero crossing rate (speech rate indicator)
-    zcr = librosa.feature.zero_crossing_rate(y)
-    features["speech_rate"] = float(np.mean(zcr))
-
-    # Spectral features
-    spec_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-    features["spectral_centroid"] = float(np.mean(spec_centroid))
-
-    return features
-
-
-def _calculate_stress_level(features: dict) -> float:
-    """Calculate stress level (0-1) from audio features."""
-    stress = 0.0
-    weight_total = 0.0
-
-    # High pitch variance = stress
-    if features.get("pitch_std", 0) > 50:
-        stress += 0.3
-    weight_total += 0.3
-
-    # High energy = agitation/fear
-    if features.get("energy_rms", 0) > 0.05:
-        stress += 0.25
-    weight_total += 0.25
-
-    # High speech rate = panic
-    if features.get("speech_rate", 0) > 0.15:
-        stress += 0.25
-    weight_total += 0.25
-
-    # High pitch range = emotional distress
-    if features.get("pitch_range", 0) > 100:
-        stress += 0.2
-    weight_total += 0.2
-
-    return min(stress / weight_total if weight_total > 0 else 0.0, 1.0)
-
-
-def _classify_emotion(features: dict) -> str:
-    """Classify dominant emotion from audio features."""
-    stress = _calculate_stress_level(features)
-    energy = features.get("energy_rms", 0)
-    pitch = features.get("pitch_mean", 0)
-
-    if stress > 0.75:
-        return "fear/panic"
-    elif stress > 0.55:
-        return "distress"
-    elif stress > 0.35:
-        return "anxious"
-    elif energy < 0.02:
-        return "calm/whisper"
-    else:
-        return "neutral"
-
-
-def _assess_danger_from_voice(stress_level: float, features: dict) -> str:
-    """Map stress level to danger classification."""
-    if stress_level >= 0.80:
-        return DangerLevel.critical.value
-    elif stress_level >= 0.65:
-        return DangerLevel.high.value
-    elif stress_level >= 0.45:
-        return DangerLevel.medium.value
-    elif stress_level >= 0.25:
-        return DangerLevel.low.value
-    else:
-        return DangerLevel.safe.value
-
-
-def _mock_voice_analysis() -> dict:
-    """Return mock analysis when audio libs are unavailable."""
+def _get_default_analysis() -> Dict[str, Any]:
     return {
-        "stress_level": 0.45,
-        "emotion": "anxious",
+        "stress_score": 0.5,
+        "emotion": "undetermined",
         "danger_level": "medium",
-        "confidence": 0.60,
-        "trigger_emergency": False,
-        "features": {"pitch_mean": 220.0, "pitch_std": 35.0, "energy_rms": 0.04, "speech_rate": 0.12},
+        "acoustic_features": {},
+        "trigger_emergency": False
     }

@@ -1,16 +1,16 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Form
 from app.models.alert import SOSAlertCreate, SOSAlertResponse, LocationData
 from app.services.alert_service import (
     create_sos_alert, get_active_alerts, get_user_alerts,
     resolve_alert, format_alert_response
 )
-from app.ai.llm_engine import analyze_text_for_danger
+from app.ai.llm_engine import analyze_text_for_danger, analyze_audio_intelligence
 from app.ai.voice_analyzer import transcribe_audio, analyze_voice_stress
 from app.core.security import get_current_user, get_current_admin
 from app.core.config import settings
 from app.websockets.socket_manager import broadcast_to_admins
 from loguru import logger
-import os, uuid, aiofiles
+import os, uuid, aiofiles, traceback, shutil
 
 router = APIRouter(prefix="/api/sos", tags=["SOS Alerts"])
 
@@ -43,54 +43,83 @@ async def trigger_sos(
 
 
 @router.post("/trigger-voice")
+@router.post("/upload-audio")
 async def trigger_sos_with_voice(
-    user_id: str,
-    latitude: float,
-    longitude: float,
+    user_id: str = Form("unknown"),
+    latitude: str = Form("0.0"),
+    longitude: str = Form("0.0"),
     audio: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
     """Trigger SOS with voice recording for AI analysis."""
-    # Save audio
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    audio_id = str(uuid.uuid4())
-    audio_path = os.path.join(settings.UPLOAD_DIR, f"{audio_id}.wav")
+    try:
+        logger.info(f"UPLOAD ATTEMPT | User: {current_user.get('name')} | File: {audio.filename}")
+        
+        # Parse coordinates safely
+        try:
+            lat = float(latitude)
+            lng = float(longitude)
+        except:
+            lat, lng = 0.0, 0.0
 
-    async with aiofiles.open(audio_path, "wb") as f:
-        content = await audio.read()
-        await f.write(content)
+        # Save audio using robust shutil method
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        audio_id = str(uuid.uuid4())
+        ext = os.path.splitext(audio.filename)[1] or ".m4a"
+        audio_path = os.path.join(settings.UPLOAD_DIR, f"{audio_id}{ext}")
 
-    # AI analysis pipeline
-    transcript = await transcribe_audio(audio_path)
-    voice_analysis = await analyze_voice_stress(audio_path)
-    text_analysis = await analyze_text_for_danger(transcript or "", {"latitude": latitude, "longitude": longitude})
+        logger.info(f"SAVING TO: {audio_path}")
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+        
+        logger.success(f"FILE SAVED | Size: {os.path.getsize(audio_path)} bytes")
 
-    # Merge analyses
-    combined_danger = max(
-        voice_analysis.get("danger_level", "low"),
-        text_analysis.get("danger_level", "low"),
-        key=lambda x: ["safe", "low", "medium", "high", "critical"].index(x)
-    )
+        # AI analysis pipeline: Transcription + Acoustic Analysis
+        transcript = await transcribe_audio(audio_path)
+        acoustic_analysis = await analyze_voice_stress(audio_path)
+        
+        # Advanced Intelligence Analysis via GPT-4
+        intelligence = await analyze_audio_intelligence(
+            transcript or "", 
+            acoustic_analysis, 
+            {"latitude": lat, "longitude": lng}
+        )
 
-    location = LocationData(latitude=latitude, longitude=longitude)
-    alert_data = SOSAlertCreate(
-        user_id=current_user["_id"],
-        trigger_type="voice",
-        location=location,
-        message=transcript,
-        audio_file_path=audio_path,
-    )
+        location = LocationData(latitude=lat, longitude=lng)
+        alert_data = SOSAlertCreate(
+            user_id=current_user["_id"],
+            trigger_type="voice_intelligence",
+            location=location,
+            message=transcript,
+            audio_file_path=audio_path,
+        )
 
-    merged_analysis = {**text_analysis, "voice": voice_analysis, "transcript": transcript, "danger_level": combined_danger}
-    alert = await create_sos_alert(alert_data, merged_analysis)
+        alert = await create_sos_alert(alert_data, intelligence)
 
-    return {
-        "alert": await format_alert_response(alert),
-        "transcript": transcript,
-        "voice_analysis": voice_analysis,
-        "text_analysis": text_analysis,
-        "combined_danger_level": combined_danger,
-    }
+        # Broadcast TACTICAL INTEL to admins in real-time
+        from datetime import datetime
+        await broadcast_to_admins("tactical_intel_update", {
+            "alert_id": alert["_id"],
+            "user_name": current_user.get("name"),
+            "transcript": transcript,
+            "intelligence": intelligence,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        return {
+            "success": True,
+            "alert": await format_alert_response(alert),
+            "intelligence": intelligence,
+            "transcript": transcript
+        }
+
+    except Exception as e:
+        logger.error(f"CRITICAL UPLOAD ERROR: {str(e)}")
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 @router.get("/active")
@@ -125,3 +154,26 @@ async def resolve_sos_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     return await format_alert_response(alert)
+
+
+@router.get("/audio/{alert_id}")
+async def get_emergency_audio(alert_id: str, current_admin: dict = Depends(get_current_admin)):
+    """Serve emergency audio evidence (admin only)."""
+    # Find the log in voice_logs or alerts
+    voice_logs = get_collection("voice_logs")
+    log = await voice_logs.find_one({"alert_id": alert_id})
+    if not log or not log.get("audio_path"):
+        # Try finding in alerts
+        alerts_col = get_collection("alerts")
+        alert = await alerts_col.find_one({"_id": alert_id})
+        if not alert or not alert.get("audio_file_path"):
+            raise HTTPException(status_code=404, detail="Audio evidence not found")
+        path = alert["audio_file_path"]
+    else:
+        path = log["audio_path"]
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Audio file missing on server")
+    
+    from fastapi.responses import FileResponse
+    return FileResponse(path, media_type="audio/wav")

@@ -62,22 +62,45 @@ export default function SOSScreen({ navigation }: any) {
   };
 
   const setupShakeDetection = () => {
+    if (!user?.safety_preferences?.shake_detection) return;
+
     let lastShake = 0;
     let localCount = 0;
+    const sensitivity = user?.safety_preferences?.shake_sensitivity || 2.8;
+    
     Accelerometer.setUpdateInterval(100);
     Accelerometer.addListener(({ x, y, z }) => {
+      // Calculate acceleration magnitude
       const magnitude = Math.sqrt(x * x + y * y + z * z);
       const now = Date.now();
-      if (magnitude > 2.8 && now - lastShake > 500) {
+
+      // Detection logic: rapid movement above threshold
+      if (magnitude > sensitivity && now - lastShake > 300) {
         lastShake = now;
         localCount++;
         setShakeCount(localCount);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        
+        // Rapid shake threshold: 3 shakes within 1.5 seconds
         if (localCount >= 3) {
           localCount = 0;
           setShakeCount(0);
-          startCountdown('shake');
+          
+          if (user?.safety_preferences?.sos_auto_activation) {
+            // Instant trigger without countdown if auto-activation is on
+            triggerSOS('shake');
+          } else {
+            startCountdown('shake');
+          }
         }
+        
+        // Reset counter if no shake for 1.5s (prevention of slow accumulation)
+        setTimeout(() => {
+          if (Date.now() - lastShake > 1500) {
+            localCount = 0;
+            setShakeCount(0);
+          }
+        }, 1600);
       }
     });
   };
@@ -126,18 +149,80 @@ export default function SOSScreen({ navigation }: any) {
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (permission.status !== 'granted') return;
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = recording;
+      setIsRecording(true);
+      console.log('Recording started');
+    } catch (err) {
+      console.error('Failed to start recording', err);
+    }
+  };
+
+  const stopAndUploadRecording = async () => {
+    if (!recordingRef.current) return;
+    try {
+      setIsRecording(false);
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+
+      if (uri) {
+        await uploadAudio(uri);
+      }
+    } catch (err) {
+      console.error('Failed to stop recording', err);
+    }
+  };
+
+  const uploadAudio = async (uri: string) => {
+    console.log('UPLOAD_DEBUG | Starting upload for URI:', uri);
+    try {
+      const formData = new FormData();
+      const filename = uri.split('/').pop() || 'sos_audio.m4a';
+      const type = 'audio/m4a';
+      
+      const fileUri = Platform.OS === 'android' ? (uri.startsWith('file://') ? uri : `file://${uri}`) : uri;
+      console.log('UPLOAD_DEBUG | Final File URI:', fileUri);
+
+      formData.append('audio', { uri: fileUri, name: filename, type } as any);
+      formData.append('user_id', user?.id || '');
+      formData.append('latitude', location?.latitude?.toString() || '0');
+      formData.append('longitude', location?.longitude?.toString() || '0');
+
+      console.log('UPLOAD_DEBUG | Sending FormData to /api/sos/trigger-voice...');
+      const res = await sosAPI.triggerWithVoice(formData);
+      console.log('UPLOAD_DEBUG | Upload Success:', res.status);
+      setAnalyzeResult(res.data.intelligence);
+    } catch (err: any) {
+      console.error('UPLOAD_DEBUG | Audio upload failed:', err.message);
+      if (err.response) {
+        console.error('UPLOAD_DEBUG | Error Response Data:', err.response.data);
+      }
+    }
+  };
+
   const triggerSOS = async (trigger = 'button') => {
     setPhase('sending');
     Vibration.vibrate([0, 500, 200, 500]);
     startLiveTracking();
-
-    // Fire Emergency Call immediately
-    if (primaryContact?.phone) {
-      Linking.openURL(`tel:${primaryContact.phone}`).catch(() => {});
-    }
+    
+    // START EMERGENCY AUDIO RECORDING
+    startRecording();
 
     try {
-      // Backend Alert
+      // Backend Alert - This triggers the Twilio calls and SMS automatically
       await sosAPI.trigger({
         user_id: user?.id,
         trigger_type: trigger,
@@ -145,16 +230,30 @@ export default function SOSScreen({ navigation }: any) {
         message: message || (isHiddenMode ? 'SILENT SOS TRIGGERED' : 'Emergency SOS Alert'),
       });
 
-      // Socket Update
+      // Socket Update for real-time dashboard tracking
       emitSOS({
         latitude: location?.latitude || 0,
         longitude: location?.longitude || 0,
       }, 'high');
 
       setPhase('sent');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // STOP AND UPLOAD AUDIO AFTER 5 SECONDS OF CAPTURE
+      setTimeout(() => {
+        stopAndUploadRecording();
+      }, 5000);
+
     } catch (err) {
       console.error("SOS Trigger failed", err);
-      setPhase('sent'); // Show sent anyway to keep user calm
+      if (primaryContact?.phone && !isHiddenMode) {
+        Alert.alert(
+          'Connection Error', 
+          'Backend SOS failed. Triggering local emergency call instead.',
+          [{ text: 'Call Now', onPress: () => Linking.openURL(`tel:${primaryContact.phone}`) }]
+        );
+      }
+      setPhase('sent');
     }
   };
 
@@ -169,8 +268,8 @@ export default function SOSScreen({ navigation }: any) {
         if (!uri) return;
 
         setPhase('sending');
-        const formData = new FormData();
-        formData.append('audio', { uri, name: 'voice_sos.wav', type: 'audio/wav' } as any);
+        const fileUri = Platform.OS === 'android' ? (uri.startsWith('file://') ? uri : `file://${uri}`) : uri;
+        formData.append('audio', { uri: fileUri, name: 'voice_sos.wav', type: 'audio/wav' } as any);
         const res = await aiAPI.analyzeVoice(formData);
         const data = res.data;
         setAnalyzeResult(data);
@@ -197,12 +296,38 @@ export default function SOSScreen({ navigation }: any) {
   };
 
   const reset = () => {
-    setPhase('idle');
-    setMessage('');
-    setAnalyzeResult(null);
-    Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).then(active => {
-      if (active) Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-    });
+    Alert.alert(
+      'Confirm Safety',
+      'Are you sure you want to stop emergency tracking? This will notify contacts you are safe.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'I AM SAFE', 
+          style: 'destructive',
+          onPress: async () => {
+            setPhase('idle');
+            setMessage('');
+            setAnalyzeResult(null);
+            
+            // Notify backend that SOS is resolved
+            try {
+              const activeAlerts = await sosAPI.getMyAlerts();
+              if (activeAlerts.data?.length > 0) {
+                const latest = activeAlerts.data[0];
+                if (latest.status === 'active') {
+                  await sosAPI.resolve(latest.id);
+                }
+              }
+            } catch (e) {}
+
+            Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).then(active => {
+              if (active) Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
+        },
+      ]
+    );
   };
 
   return (
@@ -269,7 +394,7 @@ export default function SOSScreen({ navigation }: any) {
                 loop
                 style={styles.lottieSending}
               />
-              <Text style={styles.sendingText}>CALLING EMERGENCY CONTACTS...</Text>
+              <Text style={styles.sendingText}>INITIATING EMERGENCY CALLS & SMS...</Text>
             </View>
           )}
 

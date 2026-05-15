@@ -28,9 +28,30 @@ async def create_user(user_data: UserCreate) -> dict:
         "role": UserRole.user.value,
         "is_active": True,
         "age": user_data.age,
+        "gender": user_data.gender,
         "address": user_data.address,
         "profile_image": None,
+        "blood_group": None,
+        "medical_conditions": None,
+        "allergies": None,
         "fcm_token": None,
+        "safety_preferences": {
+            "sos_auto_activation": False,
+            "shake_detection": False,
+            "voice_triggered_sos": False,
+            "hidden_sos_mode": False,
+            "live_tracking_enabled": True
+        },
+        "notification_settings": {
+            "sms_alerts": True,
+            "emergency_calls": True,
+            "push_notifications": True,
+            "notification_sounds": True
+        },
+        "security_settings": {
+            "biometric_login": False,
+            "two_factor_auth": False
+        },
         "created_at": now,
         "updated_at": now,
     }
@@ -65,6 +86,13 @@ async def update_user(user_id: str, update_data: UserUpdate) -> Optional[dict]:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+    
+    # Handle nested models if they are provided as objects
+    for field in ["safety_preferences", "notification_settings", "security_settings"]:
+        if field in update_dict and update_dict[field] is not None:
+            if hasattr(update_dict[field], "dict"):
+                update_dict[field] = update_dict[field].dict()
+
     update_dict["updated_at"] = datetime.utcnow()
 
     await collection.update_one({"_id": user_id}, {"$set": update_dict})
@@ -88,8 +116,29 @@ def format_user_response(user: dict) -> dict:
         "role": user.get("role", "user"),
         "is_active": user.get("is_active", True),
         "age": user.get("age"),
+        "gender": user.get("gender"),
         "address": user.get("address"),
         "profile_image": user.get("profile_image"),
+        "blood_group": user.get("blood_group"),
+        "medical_conditions": user.get("medical_conditions"),
+        "allergies": user.get("allergies"),
+        "safety_preferences": user.get("safety_preferences", {
+            "sos_auto_activation": False,
+            "shake_detection": False,
+            "voice_triggered_sos": False,
+            "hidden_sos_mode": False,
+            "live_tracking_enabled": True
+        }),
+        "notification_settings": user.get("notification_settings", {
+            "sms_alerts": True,
+            "emergency_calls": True,
+            "push_notifications": True,
+            "notification_sounds": True
+        }),
+        "security_settings": user.get("security_settings", {
+            "biometric_login": False,
+            "two_factor_auth": False
+        }),
         "created_at": user["created_at"],
         "updated_at": user["updated_at"],
     }
