@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { adminAPI } from './api';
 import { 
   AlertTriangle, Clock, MapPin, CheckCircle, 
-  ExternalLink, User, Phone, ShieldAlert, X
+  ExternalLink, User, Phone, ShieldAlert, X, Trash2
 } from 'lucide-react';
 
 export default function AlertsPage() {
@@ -34,6 +34,17 @@ export default function AlertsPage() {
       load();
     } catch (e) {
       alert("Failed to resolve alert");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("⚠️ DANGER: PERMANENT DELETION ⚠️\n\nAre you absolutely sure you want to PERMANENTLY DELETE this emergency alert?\n\nThis will erase all incident logs, threat analytics, and maps records for this alert! This action CANNOT BE UNDONE!")) return;
+    try {
+      await adminAPI.deleteAlert(id);
+      setSelectedAlert(null); // Close modal if open
+      load();
+    } catch (e) {
+      alert("Failed to permanently delete alert");
     }
   };
 
@@ -112,6 +123,17 @@ export default function AlertsPage() {
             </div>
 
             <div style={{ marginTop: '32px', display: 'flex', gap: '16px' }}>
+              <button 
+                onClick={() => handleDelete(selectedAlert.id)} 
+                style={{ 
+                  flex: 1, padding: '14px', borderRadius: '10px', 
+                  border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)', 
+                  color: '#ef4444', cursor: 'pointer', fontWeight: 700, fontSize: '14px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}
+              >
+                <Trash2 size={16} /> DELETE
+              </button>
               <button onClick={() => setSelectedAlert(null)} style={{ flex: 1, padding: '14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '14px' }}>CLOSE</button>
               <button 
                 onClick={() => { window.open(`https://www.google.com/maps?q=${selectedAlert.location?.latitude},${selectedAlert.location?.longitude}`); }} 
@@ -189,7 +211,18 @@ export default function AlertsPage() {
                     </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <button 
+                    onClick={() => handleDelete(alert.id)}
+                    style={{ 
+                      padding: '12px', color: '#ef4444', cursor: 'pointer', 
+                      background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)',
+                      borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                    title="Permanently Delete Alert"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                   <button 
                     onClick={() => setSelectedAlert(alert)}
                     className="glass-card" 

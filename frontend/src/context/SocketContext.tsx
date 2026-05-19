@@ -9,6 +9,7 @@ interface SocketContextType {
   isConnected: boolean;
   sendLocation: (lat: number, lng: number, accuracy?: number) => void;
   emitSOS: (location: any, severity?: string) => void;
+  dangerAlerts: any[];
 }
 
 const SocketContext = createContext<SocketContextType | null>(null);
@@ -17,6 +18,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const { user, isAuthenticated } = useAuth();
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [dangerAlerts, setDangerAlerts] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated || !user) return;
@@ -37,6 +39,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     socket.on('connect_error', (err) => {
       console.warn('Socket error:', err.message);
+    });
+
+    socket.on('danger_alert', (alert) => {
+      setDangerAlerts((prev) => [alert, ...prev]);
     });
 
     socketRef.current = socket;
@@ -71,6 +77,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isConnected,
       sendLocation,
       emitSOS,
+      dangerAlerts,
     }}>
       {children}
     </SocketContext.Provider>

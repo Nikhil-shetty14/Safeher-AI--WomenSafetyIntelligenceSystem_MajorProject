@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Form
-from app.models.alert import SOSAlertCreate, SOSAlertResponse, LocationData
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from app.models.alert import SOSAlertCreate, SOSAlertResponse, LocationData, SOSAlertTriggerResponse
 from app.services.alert_service import (
     create_sos_alert, get_active_alerts, get_user_alerts,
     resolve_alert, format_alert_response
@@ -9,37 +9,114 @@ from app.ai.voice_analyzer import transcribe_audio, analyze_voice_stress
 from app.core.security import get_current_user, get_current_admin
 from app.core.config import settings
 from app.websockets.socket_manager import broadcast_to_admins
+from app.core.database import get_collection
 from loguru import logger
 import os, uuid, aiofiles, traceback, shutil
 
 router = APIRouter(prefix="/api/sos", tags=["SOS Alerts"])
 
 
-@router.post("/trigger", response_model=SOSAlertResponse)
+@router.post("/trigger", response_model=SOSAlertTriggerResponse)
 async def trigger_sos(
     alert_data: SOSAlertCreate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Trigger an SOS alert manually."""
-    alert_data.user_id = current_user["_id"]
+    """Trigger an SOS alert manually with full exception safety."""
+    ai_fallback_used = False
+    sms_status = "success"
+    alert_doc = None
+    
+    try:
+        logger.info(f"SOS TRIGGERED | User: {current_user.get('name')} ({current_user.get('_id')}) | Type: {alert_data.trigger_type}")
+        alert_data.user_id = current_user["_id"]
 
-    # Quick AI analysis if message provided
-    ai_analysis = None
-    if alert_data.message:
-        ai_analysis = await analyze_text_for_danger(alert_data.message, alert_data.location.dict())
+        # Quick AI analysis if message provided
+        ai_analysis = None
+        if alert_data.message:
+            try:
+                ai_analysis = await analyze_text_for_danger(alert_data.message, alert_data.location.dict())
+                if ai_analysis and ai_analysis.get("fallback_active"):
+                    ai_fallback_used = True
+            except Exception as ai_err:
+                logger.error(f"SOS AI ERROR: {str(ai_err)}")
+                traceback.print_exc()
+                ai_fallback_used = True
+                ai_analysis = {
+                    "danger_level": "HIGH",
+                    "risk_score": 80,
+                    "emotion": "panic",
+                    "fallback_active": True,
+                    "fallback_reason": str(ai_err)
+                }
 
-    alert = await create_sos_alert(alert_data, ai_analysis)
+        # Check emergency contacts to determine SMS status baseline
+        try:
+            contacts_col = get_collection("emergency_contacts")
+            if contacts_col is not None:
+                contacts = await contacts_col.find({"user_id": current_user["_id"]}).to_list(length=10)
+                if not contacts:
+                    sms_status = "no_contacts_configured"
+                    logger.warning(f"No emergency contacts configured for user {current_user.get('name')}")
+            else:
+                sms_status = "database_unavailable"
+        except Exception as contacts_err:
+            logger.error(f"SOS Contacts check failed: {str(contacts_err)}")
+            sms_status = "error_checking_contacts"
 
-    # Broadcast via WebSocket to admins
-    await broadcast_to_admins("new_sos_alert", {
-        "alert_id": alert["_id"],
-        "user_id": alert["user_id"],
-        "user_name": current_user.get("name"),
-        "severity": alert["severity"],
-        "location": alert["location"],
-    })
+        # Create the alert record
+        alert = await create_sos_alert(alert_data, ai_analysis)
+        alert_doc = await format_alert_response(alert)
 
-    return await format_alert_response(alert)
+        # Format location safely for JSON/Socket.IO serialization
+        try:
+            from datetime import datetime
+            loc = alert["location"]
+            timestamp = loc.get("timestamp")
+            if isinstance(timestamp, datetime):
+                timestamp = timestamp.isoformat()
+            elif timestamp:
+                timestamp = str(timestamp)
+                
+            location_payload = {
+                "latitude": loc["latitude"],
+                "longitude": loc["longitude"],
+                "accuracy": loc.get("accuracy"),
+                "address": loc.get("address"),
+                "timestamp": timestamp,
+            }
+
+            # Broadcast via WebSocket to admins
+            await broadcast_to_admins("new_sos_alert", {
+                "alert_id": alert["_id"],
+                "user_id": alert["user_id"],
+                "user_name": current_user.get("name"),
+                "severity": alert["severity"],
+                "location": location_payload,
+            })
+        except Exception as ws_err:
+            logger.error(f"SOS WebSocket Broadcast failed: {str(ws_err)}")
+            traceback.print_exc()
+
+        return {
+            "success": True,
+            "message": "SOS triggered successfully",
+            "ai_fallback_used": ai_fallback_used,
+            "sms_status": sms_status,
+            "alert": alert_doc
+        }
+
+    except Exception as e:
+        logger.error(f"SOS TRIGGER CRITICAL ERROR: {str(e)}")
+        traceback.print_exc()
+        
+        # Fallback return to prevent ASGI app crashes
+        return {
+            "success": False,
+            "message": f"SOS trigger failed internally: {str(e)}",
+            "ai_fallback_used": True,
+            "sms_status": "failed",
+            "alert": None
+        }
 
 
 @router.post("/trigger-voice")
@@ -159,13 +236,19 @@ async def resolve_sos_alert(
 @router.get("/audio/{alert_id}")
 async def get_emergency_audio(alert_id: str, current_admin: dict = Depends(get_current_admin)):
     """Serve emergency audio evidence (admin only)."""
-    # Find the log in voice_logs or alerts
+    # Find the log in voice_logs or alerts safely
     voice_logs = get_collection("voice_logs")
-    log = await voice_logs.find_one({"alert_id": alert_id})
+    log = None
+    if voice_logs is not None:
+        log = await voice_logs.find_one({"alert_id": alert_id})
+
     if not log or not log.get("audio_path"):
-        # Try finding in alerts
+        # Try finding in alerts safely
         alerts_col = get_collection("alerts")
-        alert = await alerts_col.find_one({"_id": alert_id})
+        alert = None
+        if alerts_col is not None:
+            alert = await alerts_col.find_one({"_id": alert_id})
+            
         if not alert or not alert.get("audio_file_path"):
             raise HTTPException(status_code=404, detail="Audio evidence not found")
         path = alert["audio_file_path"]

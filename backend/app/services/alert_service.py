@@ -56,74 +56,90 @@ async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None)
 
 
 async def notify_emergency_contacts(user_id: str, alert: dict):
-    """Notify all emergency contacts via SMS and call."""
-    contacts_collection = get_collection("emergency_contacts")
-    users_collection = get_collection("users")
+    """Notify all emergency contacts via SMS and call safely without throwing uncaught async loop exceptions."""
+    import traceback
+    try:
+        contacts_collection = get_collection("emergency_contacts")
+        users_collection = get_collection("users")
 
-    if contacts_collection is None or users_collection is None:
-        return
+        if contacts_collection is None or users_collection is None:
+            logger.warning("Database unavailable during emergency contact notification")
+            return
 
-    user = await users_collection.find_one({"_id": user_id})
-    if not user:
-        return
+        user = await users_collection.find_one({"_id": user_id})
+        if not user:
+            logger.error(f"User {user_id} not found when trying to notify emergency contacts")
+            return
 
-    contacts = await contacts_collection.find({"user_id": user_id}).to_list(length=10)
-    if not contacts:
-        logger.warning(f"No emergency contacts found for user {user_id}")
-        return
+        contacts = await contacts_collection.find({"user_id": user_id}).to_list(length=10)
+        if not contacts:
+            logger.info(f"No emergency contacts configured for user {user.get('name')}")
+            return
 
-    location = alert.get("location", {})
-    lat = location.get("latitude", 0)
-    lng = location.get("longitude", 0)
+        location = alert.get("location", {})
+        lat = location.get("latitude", 0)
+        lng = location.get("longitude", 0)
 
-    maps_link = f"https://maps.google.com/?q={lat},{lng}"
-    sms_message = (
-        f"🚨 SafeHer AI EMERGENCY ALERT 🚨\n\n"
-        f"I ({user['name']}) may be in danger! Track my live location here:\n"
-        f"{maps_link}\n\n"
-        f"Alert Time: {alert['created_at'].strftime('%H:%M:%S UTC')}\n"
-        f"Please check on me immediately!"
-    )
-
-    notified_sms = []
-    notified_calls = []
-    
-    # Notify all contacts in parallel for maximum speed
-    tasks = []
-    
-    for contact in contacts:
-        logger.info(f"Triggering emergency workflow for {contact['name']} ({contact['phone']})")
-        
-        # SMS for all
-        tasks.append(send_emergency_sms(user_id, contact["phone"], sms_message))
-        
-        # Calls for all (as requested: 'triggers phone calls to saved emergency contacts')
-        tasks.append(make_emergency_call(user_id, contact["phone"], user["name"]))
-
-    # Wait for all initial attempts
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # Log results summary
-    logger.success(f"Emergency notification cycle complete for {user['name']}. Processes triggered: {len(tasks)}")
-
-    # Update alert record with notification status
-    alerts_collection = get_collection("alerts")
-    if alerts_collection is not None:
-        await alerts_collection.update_one(
-            {"_id": alert["_id"]},
-            {"$set": {
-                "notified_timestamp": datetime.utcnow(),
-                "emergency_broadcast_active": True
-            }}
+        maps_link = f"https://maps.google.com/?q={lat},{lng}"
+        sms_message = (
+            f"🚨 SafeHer AI EMERGENCY ALERT 🚨\n\n"
+            f"I ({user.get('name', 'User')}) may be in danger! Track my live location here:\n"
+            f"{maps_link}\n\n"
+            f"Alert Time: {alert.get('created_at', datetime.utcnow()).strftime('%H:%M:%S UTC')}\n"
+            f"Please check on me immediately!"
         )
 
-    # Send push notification to user
-    if user.get("fcm_token"):
-        await send_push_notification(
-            user["fcm_token"],
-            "SOS Alert Sent",
-            f"Emergency contacts have been notified. Help is on the way!",
-        )
+        # Notify all contacts in parallel for maximum speed
+        tasks = []
+        for contact in contacts:
+            logger.info(f"Triggering emergency workflow for {contact.get('name')} ({contact.get('phone')})")
+            
+            # SMS for all
+            if contact.get("phone"):
+                tasks.append(send_emergency_sms(user_id, contact["phone"], sms_message))
+                
+            # Calls for all (as requested: 'triggers phone calls to saved emergency contacts')
+            if contact.get("phone"):
+                tasks.append(make_emergency_call(user_id, contact["phone"], user.get("name", "User")))
+
+        if tasks:
+            # Wait for all initial attempts safely
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Log results and check if any exceptions were thrown
+            for res in results:
+                if isinstance(res, Exception):
+                    logger.error(f"Emergency worker task failed: {res}")
+            
+            logger.success(f"Emergency notification cycle complete for {user.get('name')}. Processes triggered: {len(tasks)}")
+        else:
+            logger.warning(f"No valid phone numbers found for emergency contacts of {user.get('name')}")
+
+        # Update alert record with notification status
+        alerts_collection = get_collection("alerts")
+        if alerts_collection is not None:
+            await alerts_collection.update_one(
+                {"_id": alert["_id"]},
+                {"$set": {
+                    "notified_timestamp": datetime.utcnow(),
+                    "emergency_broadcast_active": True
+                }}
+            )
+
+        # Send push notification to user safely
+        if user.get("fcm_token"):
+            try:
+                await send_push_notification(
+                    user["fcm_token"],
+                    "SOS Alert Sent",
+                    f"Emergency contacts have been notified. Help is on the way!",
+                )
+            except Exception as push_err:
+                logger.error(f"Failed to send push notification: {push_err}")
+
+    except Exception as e:
+        logger.error(f"CRITICAL ERROR inside notify_emergency_contacts background task: {str(e)}")
+        traceback.print_exc()
 
 
 async def get_active_alerts(skip: int = 0, limit: int = 50) -> List[dict]:

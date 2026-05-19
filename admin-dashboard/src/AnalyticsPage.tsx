@@ -17,7 +17,15 @@ export default function AnalyticsPage() {
   const [stats, setStats] = useState<any>(null);
 
   useEffect(() => {
-    adminAPI.getDangerTrends().then(r => setTrends(r.data || [])).catch(() => {});
+    adminAPI.getDangerTrends().then(r => {
+      const mapped = (r.data || []).map((t: any) => ({
+        date: new Date(t.date).toLocaleDateString('en', { weekday: 'short' }),
+        high: t.levels.high || 0,
+        medium: t.levels.medium || 0,
+        low: t.levels.low || 0,
+      }));
+      setTrends(mapped);
+    }).catch(() => {});
     adminAPI.getStats().then(r => setStats(r.data)).catch(() => {});
   }, []);
 

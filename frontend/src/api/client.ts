@@ -40,7 +40,12 @@ export const authAPI = {
 export const sosAPI = {
   trigger: (data: any) => api.post('/api/sos/trigger', data),
   triggerWithVoice: (formData: FormData) =>
-    api.post('/api/sos/trigger-voice', formData),
+    api.post('/api/sos/trigger-voice', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      transformRequest: (data) => data,
+    }),
   getMyAlerts: (skip = 0, limit = 20) =>
     api.get(`/api/sos/my-alerts?skip=${skip}&limit=${limit}`),
   resolveAlert: (alertId: string) => api.patch(`/api/sos/${alertId}/resolve`),
@@ -58,12 +63,18 @@ export const contactsAPI = {
 export const aiAPI = {
   analyzeText: (data: any) => api.post('/api/ai/analyze-text', data),
   analyzeVoice: (formData: FormData) =>
-    api.post('/api/ai/analyze-voice', formData),
+    api.post('/api/ai/analyze-voice', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      transformRequest: (data) => data,
+    }),
   chat: (message: string, sessionId?: string) =>
     api.post('/api/ai/chat', { message, session_id: sessionId }),
   getAreaRisk: (lat: number, lng: number) =>
     api.get(`/api/ai/area-risk?latitude=${lat}&longitude=${lng}`),
   getPredictionHistory: () => api.get('/api/ai/predictions/history'),
+  predictRouteSafety: (data: any) => api.post('/api/ai/predict-route-safety', data),
 };
 
 // ─── Location ─────────────────────────────────────────
@@ -89,7 +100,12 @@ export const profileAPI = {
   updateNotifications: (data: any) => api.put('/api/profile/preferences/notifications', data),
   updateSecurity: (data: any) => api.put('/api/profile/preferences/security', data),
   uploadPhoto: (formData: FormData) =>
-    api.post('/api/profile/upload-photo', formData),
+    api.post('/api/profile/upload-photo', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      transformRequest: (data) => data,
+    }),
   getHistorySummary: () => api.get('/api/profile/history/summary'),
 };
 

@@ -34,6 +34,7 @@ export const adminAPI = {
   getHeatmap: () => api.get('/api/admin/alerts/heatmap'),
   getDangerTrends: () => api.get('/api/admin/analytics/danger-trends'),
   resolveAlert: (id: string) => api.patch(`/api/sos/${id}/resolve`),
+  deleteAlert: (id: string) => api.delete(`/api/admin/alerts/${id}`),
 };
 
 export default api;

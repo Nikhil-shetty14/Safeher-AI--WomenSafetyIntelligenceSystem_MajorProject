@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<any[]>([]);
 
   const [tacticalIntel, setTacticalIntel] = useState<any>(null);
+  const [showRiskReport, setShowRiskReport] = useState(false);
 
   useEffect(() => {
     if (!socket) return;
@@ -232,7 +233,11 @@ export default function Dashboard() {
             <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px' }}>
               <div style={{ height: '100%', width: '94%', background: '#10b981', borderRadius: '2px' }} />
             </div>
-            <button className="glass-card" style={{ width: '100%', padding: '10px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, color: '#fff', background: '#8b5cf6' }}>
+            <button 
+              onClick={() => setShowRiskReport(true)}
+              className="glass-card" 
+              style={{ width: '100%', padding: '10px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, color: '#fff', background: '#8b5cf6' }}
+            >
               GENERATE RISK REPORT
             </button>
           </div>
@@ -363,6 +368,114 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Risk Report Modal */}
+      {showRiskReport && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 10, 30, 0.85)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div className="glass-card" style={{
+            width: '550px', padding: '32px', border: '1px solid rgba(139, 92, 246, 0.3)',
+            background: 'linear-gradient(135deg, #16102b 0%, #0c081d 100%)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)', borderRadius: '16px',
+            position: 'relative'
+          }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Brain color="#a78bfa" size={24} />
+                <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#f8f4ff' }}>Tactical Risk Report</h3>
+              </div>
+              <span style={{
+                background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444',
+                color: '#ef4444', padding: '4px 8px', borderRadius: '6px',
+                fontSize: '11px', fontWeight: 700, textTransform: 'uppercase'
+              }}>HIGH RISK</span>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#cbd5e1', fontSize: '13px', lineHeight: 1.5 }}>
+              <div>
+                <p style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>Target Zone</p>
+                <p style={{ fontSize: '16px', fontWeight: 700, color: '#fff', marginTop: '2px' }}>Sector 7 — Central Urban District</p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <p style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' }}>Confidence Index</p>
+                  <p style={{ fontSize: '18px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>94.2%</p>
+                </div>
+                <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <p style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' }}>Historical Incidents</p>
+                  <p style={{ fontSize: '18px', fontWeight: 800, color: '#a78bfa', marginTop: '4px' }}>12 Active Alerts</p>
+                </div>
+              </div>
+
+              <div>
+                <p style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>Threat Breakdown</p>
+                <ul style={{ paddingLeft: '16px', margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <li><strong>Infrastructure Deficit:</strong> Over 40% of street lighting reporting inactive or dim status.</li>
+                  <li><strong>Voice Distress Anomalies:</strong> Live stress markers show cluster alerts near local transit stops.</li>
+                  <li><strong>Spatial Vulnerability:</strong> Narrow pedestrian passages with extremely low density of smart safety booths.</li>
+                </ul>
+              </div>
+
+              <div>
+                <p style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>Mitigation Guidelines</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ padding: '8px 12px', background: 'rgba(139,92,246,0.05)', borderRadius: '6px', borderLeft: '3px solid #8b5cf6' }}>
+                     <strong>A. Smart Patrol Dispatch:</strong> Redirect active responder vehicle #04 to perform visual safety sweeps.
+                  </div>
+                  <div style={{ padding: '8px 12px', background: 'rgba(6,182,212,0.05)', borderRadius: '6px', borderLeft: '3px solid #06b6d4' }}>
+                     <strong>B. Ad-hoc Routing Warning:</strong> Push warning triggers to users utilizing "Safe Routing" near Sector 7.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', gap: '12px', marginTop: '28px' }}>
+              <button 
+                onClick={() => {
+                  alert('Emergency patrols dispatched to Sector 7.');
+                  setShowRiskReport(false);
+                }}
+                style={{
+                  flex: 1, padding: '12px', borderRadius: '8px', border: 'none',
+                  background: '#8b5cf6', color: '#fff', fontWeight: 700, cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(139,92,246,0.3)'
+                }}
+              >
+                DISPATCH PATROLS
+              </button>
+              <button 
+                onClick={() => {
+                  alert('SafeRoute warning advisory broadcast to all active mobile clients.');
+                  setShowRiskReport(false);
+                }}
+                style={{
+                  flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #06b6d4',
+                  background: 'rgba(6,182,212,0.1)', color: '#06b6d4', fontWeight: 700, cursor: 'pointer'
+                }}
+              >
+                BROADCAST ADVISORY
+              </button>
+              <button 
+                onClick={() => setShowRiskReport(false)}
+                style={{
+                  padding: '12px 20px', borderRadius: '8px', border: '1px solid #334155',
+                  background: 'transparent', color: '#94a3b8', fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                CLOSE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

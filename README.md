@@ -15,8 +15,10 @@
 - **📍 Real-time Location Tracking:** Live GPS tracking broadcasted to trusted contacts and the Admin Dashboard via Socket.IO.
 - **🚨 Automated Emergency Dispatch:** Automatically sends SMS and initiates calls via Twilio to emergency contacts.
 - **📊 Admin Dashboard:** Comprehensive real-time monitoring portal with a heat map, active alerts, and user analytics.
+- **📱 Premium Command Center UI:** A stunning, dark-themed mobile dashboard featuring an animated SOS trigger, live AI safety scoring, offline mode, and quick access to silent/stealth features.
 - **💬 SafeHer AI Chatbot:** An intelligent companion that can converse, assess the situation, and proactively trigger alerts if danger is detected.
 - **👥 Emergency Contacts Management:** Easily manage primary and secondary trusted contacts.
+- **🎧 Audio Evidence Collection:** Automatically records and uploads emergency surroundings for AI analysis.
 
 ---
 

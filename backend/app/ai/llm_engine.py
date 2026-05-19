@@ -159,7 +159,7 @@ async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, locat
     Perform deep intelligence analysis on transcribed emergency audio and acoustic metadata.
     """
     if not settings.OPENAI_API_KEY:
-        return _mock_danger_analysis(transcript)
+        return _mock_audio_intelligence(transcript, acoustic_data)
 
     try:
         prompt = f"""
@@ -196,7 +196,43 @@ async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, locat
         return json.loads(response.choices[0].message.content)
     except Exception as e:
         logger.error(f"Audio Intelligence analysis failed: {e}")
-        return _mock_danger_analysis(transcript)
+        return _mock_audio_intelligence(transcript, acoustic_data)
+
+
+def _mock_audio_intelligence(transcript: str, acoustic_data: dict) -> dict:
+    """Mock audio intelligence assessment for fallback when OpenAI fails."""
+    transcript_lower = (transcript or "").lower()
+    
+    # Base risk level from acoustic stress score if available
+    acoustic_stress = acoustic_data.get("stress_score", 0.5)
+    acoustic_danger = acoustic_data.get("danger_level", "medium").upper()
+    acoustic_emotion = acoustic_data.get("emotion", "anxious")
+    
+    risk_score = int(acoustic_stress * 100)
+    danger_level = acoustic_danger
+    
+    # Heuristics based on transcript keywords
+    critical_kw = ["help me", "attacking", "rape", "kidnap", "gun", "knife", "kill"]
+    high_kw = ["following me", "scared", "someone is behind", "don't feel safe", "threatening"]
+    
+    if any(kw in transcript_lower for kw in critical_kw):
+        danger_level = "CRITICAL"
+        risk_score = max(risk_score, 95)
+    elif any(kw in transcript_lower for kw in high_kw):
+        danger_level = "HIGH"
+        risk_score = max(risk_score, 85)
+        
+    return {
+        "danger_level": danger_level,
+        "risk_score": risk_score,
+        "detected_emotions": [acoustic_emotion],
+        "detected_threats": ["voice_stress_detected"] if risk_score > 70 else [],
+        "ai_tactical_summary": f"Fallback Assessment: Speech transcript: '{transcript}'. Acoustic emotion detected: {acoustic_emotion}.",
+        "recommendations": ["Initiate visual dispatch", "Attempt immediate contact verification", "Coordinate with local safety responders"],
+        "confidence_score": 0.7,
+        "trigger_emergency_protocol": risk_score > 75,
+        "fallback_active": True
+    }
 
 
 async def chat_with_safeher(message: str, history: list = None) -> dict:

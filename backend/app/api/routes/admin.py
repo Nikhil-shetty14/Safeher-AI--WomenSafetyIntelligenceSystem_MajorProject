@@ -143,34 +143,88 @@ async def get_alerts_heatmap(_: dict = Depends(get_current_admin)):
 
 @router.get("/analytics/danger-trends")
 async def get_danger_trends(_: dict = Depends(get_current_admin)):
-    """Get AI danger prediction trends for last 7 days."""
+    """Get AI danger prediction and SOS alert trends for last 7 days."""
     predictions_col = get_collection("ai_predictions")
-    if predictions_col is None:
-        return []
-
+    alerts_col = get_collection("alerts")
+    
     since = datetime.utcnow() - timedelta(days=7)
-    cursor = predictions_col.find(
-        {"created_at": {"$gte": since}},
-        {"danger_level": 1, "created_at": 1}
-    )
-    predictions = await cursor.to_list(length=1000)
+    
+    # Fetch AI predictions
+    predictions = []
+    if predictions_col is not None:
+        cursor = predictions_col.find(
+            {"created_at": {"$gte": since}},
+            {"danger_level": 1, "created_at": 1}
+        )
+        predictions = await cursor.to_list(length=1000)
+        
+    # Fetch SOS alerts
+    alerts = []
+    if alerts_col is not None:
+        cursor = alerts_col.find(
+            {"created_at": {"$gte": since}},
+            {"severity": 1, "created_at": 1}
+        )
+        alerts = await cursor.to_list(length=1000)
 
     # Initialize with last 7 days to ensure a continuous graph
-    from collections import defaultdict
     trends = {
         (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d"): {"high": 0, "medium": 0, "low": 0}
         for i in range(7)
     }
     
+    # Process AI predictions
     for p in predictions:
         day = p["created_at"].strftime("%Y-%m-%d")
-        level = p.get("danger_level", "unknown")
+        level = str(p.get("danger_level", "unknown")).lower()
+        
+        if level in ["high", "critical"]:
+            norm_level = "high"
+        elif level == "medium":
+            norm_level = "medium"
+        else:
+            norm_level = "low"
+            
         if day in trends:
-            if level not in trends[day]:
-                trends[day][level] = 0
-            trends[day][level] += 1
+            trends[day][norm_level] += 1
+            
+    # Process SOS alerts
+    for a in alerts:
+        day = a["created_at"].strftime("%Y-%m-%d")
+        level = str(a.get("severity", "unknown")).lower()
+        
+        if level in ["high", "critical"]:
+            norm_level = "high"
+        elif level == "medium":
+            norm_level = "medium"
+        else:
+            norm_level = "low"
+            
+        if day in trends:
+            trends[day][norm_level] += 1
 
     return [
         {"date": date, "levels": levels}
         for date, levels in sorted(trends.items())
     ]
+
+
+@router.delete("/alerts/{alert_id}")
+async def delete_alert(alert_id: str, _: dict = Depends(get_current_admin)):
+    """Permanently delete an SOS alert from the database (admin only)."""
+    try:
+        alerts_col = get_collection("alerts")
+        if alerts_col is None:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+            
+        result = await alerts_col.delete_one({"_id": alert_id})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Alert not found")
+            
+        logger.warning(f"ADMIN ACTION | Permanent deletion of alert ID: {alert_id}")
+        return {"success": True, "message": f"Alert {alert_id} permanently deleted"}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error deleting alert {alert_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

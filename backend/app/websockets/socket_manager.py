@@ -49,12 +49,22 @@ async def register_user(sid, data):
     user_id = data.get("user_id")
     role = data.get("role", "user")
 
+    if role == "admin":
+        admin_sockets.add(sid)
+        logger.info(f"Admin registered on socket: {sid}")
+        await sio.emit("registered", {"status": "ok", "role": "admin"}, to=sid)
+        return
+
     if user_id:
         connected_users[user_id] = sid
-        if role == "admin":
-            admin_sockets.add(sid)
         await sio.emit("registered", {"status": "ok", "user_id": user_id}, to=sid)
         logger.info(f"User {user_id} registered (role={role})")
+
+
+@sio.event
+async def register(sid, data):
+    """Alias for register_user supporting different client frameworks."""
+    await register_user(sid, data)
 
 
 @sio.event
@@ -92,11 +102,13 @@ async def sos_triggered(sid, data):
         "severity": data.get("severity", "high"),
     }
 
-    # Broadcast to all admins
-    for admin_sid in admin_sockets:
-        await sio.emit("new_sos_alert", alert_broadcast, to=admin_sid)
-
-    logger.warning(f"SOS broadcast to {len(admin_sockets)} admin(s) for user {user_id}")
+    if admin_sockets:
+        # Broadcast to all admins
+        for admin_sid in admin_sockets:
+            await sio.emit("new_sos_alert", alert_broadcast, to=admin_sid)
+        logger.info(f"SOS broadcast to {len(admin_sockets)} admin(s) for user {user_id}")
+    else:
+        logger.info(f"SOS triggered by user {user_id}, but no admin(s) are currently connected to receive the broadcast.")
 
 
 @sio.event

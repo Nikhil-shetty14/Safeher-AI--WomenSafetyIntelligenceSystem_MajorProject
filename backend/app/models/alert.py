@@ -48,6 +48,14 @@ class SOSAlertResponse(BaseModel):
     resolved_at: Optional[datetime] = None
 
 
+class SOSAlertTriggerResponse(BaseModel):
+    success: bool
+    message: str
+    ai_fallback_used: bool
+    sms_status: str
+    alert: Optional[SOSAlertResponse] = None
+
+
 class SOSAlertUpdate(BaseModel):
     status: Optional[AlertStatus] = None
     severity: Optional[AlertSeverity] = None

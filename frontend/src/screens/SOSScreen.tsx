@@ -17,7 +17,7 @@ type SOSPhase = 'idle' | 'countdown' | 'sending' | 'sent';
 
 const LOCATION_TASK_NAME = 'SOS_LOCATION_TRACKING';
 
-export default function SOSScreen({ navigation }: any) {
+export default function SOSScreen({ navigation, route }: any) {
   const { user } = useAuth();
   const { emitSOS } = useSocket();
   const [phase, setPhase] = useState<SOSPhase>('idle');
@@ -38,11 +38,24 @@ export default function SOSScreen({ navigation }: any) {
     getLocation();
     setupShakeDetection();
     fetchPrimaryContact();
+
+    // Auto-trigger safety protocol if requested by navigation params
+    const autoTrigger = route?.params?.autoTrigger;
+    const triggerType = route?.params?.triggerType || 'button';
+
+    if (autoTrigger) {
+      if (user?.safety_preferences?.sos_auto_activation) {
+        triggerSOS(triggerType);
+      } else {
+        startCountdown(triggerType);
+      }
+    }
+
     return () => {
       Accelerometer.removeAllListeners();
       clearInterval(countdownRef.current);
     };
-  }, []);
+  }, [route?.params]);
 
   const fetchPrimaryContact = async () => {
     try {
@@ -150,6 +163,16 @@ export default function SOSScreen({ navigation }: any) {
   };
 
   const startRecording = async () => {
+    // If there is an existing recording, clean it up first
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch (e) {
+        console.warn("Error cleaning up old recording:", e);
+      }
+      recordingRef.current = null;
+    }
+
     try {
       const permission = await Audio.requestPermissionsAsync();
       if (permission.status !== 'granted') return;
@@ -158,6 +181,9 @@ export default function SOSScreen({ navigation }: any) {
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
+
+      // Brief delay (150ms) to allow audio hardware resources to fully release
+      await new Promise(resolve => setTimeout(resolve, 150));
 
       const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
@@ -183,6 +209,7 @@ export default function SOSScreen({ navigation }: any) {
       }
     } catch (err) {
       console.error('Failed to stop recording', err);
+      recordingRef.current = null;
     }
   };
 
@@ -193,7 +220,8 @@ export default function SOSScreen({ navigation }: any) {
       const filename = uri.split('/').pop() || 'sos_audio.m4a';
       const type = 'audio/m4a';
       
-      const fileUri = Platform.OS === 'android' ? (uri.startsWith('file://') ? uri : `file://${uri}`) : uri;
+      const decodedUri = decodeURIComponent(uri);
+      const fileUri = Platform.OS === 'android' ? (decodedUri.startsWith('file://') ? decodedUri : `file://${decodedUri}`) : decodedUri;
       console.log('UPLOAD_DEBUG | Final File URI:', fileUri);
 
       formData.append('audio', { uri: fileUri, name: filename, type } as any);
@@ -268,7 +296,9 @@ export default function SOSScreen({ navigation }: any) {
         if (!uri) return;
 
         setPhase('sending');
-        const fileUri = Platform.OS === 'android' ? (uri.startsWith('file://') ? uri : `file://${uri}`) : uri;
+        const formData = new FormData();
+        const decodedUri = decodeURIComponent(uri);
+        const fileUri = Platform.OS === 'android' ? (decodedUri.startsWith('file://') ? decodedUri : `file://${decodedUri}`) : decodedUri;
         formData.append('audio', { uri: fileUri, name: 'voice_sos.wav', type: 'audio/wav' } as any);
         const res = await aiAPI.analyzeVoice(formData);
         const data = res.data;
