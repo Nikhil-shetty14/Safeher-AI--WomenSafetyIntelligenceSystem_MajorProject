@@ -163,4 +163,4 @@ npm run dev
 
 ---
 
-*Built with ❤️ for women's safety — SafeHer AI*
+*Built with ⚡ for women's safety — SafeHer AI*
