@@ -68,11 +68,11 @@ async def startup():
     else:
         logger.info("Twilio configuration loaded successfully")
         
-    # Validate OpenAI Configuration
-    if not settings.OPENAI_API_KEY:
-        logger.error("OPENAI_API_KEY missing in .env! AI features will use local mock fallback.")
+    # Validate Ollama Configuration
+    if not settings.OLLAMA_BASE_URL:
+        logger.error("OLLAMA_BASE_URL missing in .env! AI features will use local mock fallback.")
     else:
-        logger.info("OpenAI configuration loaded successfully")
+        logger.info("Ollama Local LLM configuration loaded successfully")
 
     logger.info(f"SafeHer AI Backend started | Version {settings.APP_VERSION}")
 

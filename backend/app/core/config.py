@@ -16,13 +16,14 @@ class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "safeher"
 
-    # OpenAI
-    OPENAI_API_KEY: str = ""
+    # Ollama Local LLM
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
 
     # Twilio
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_PHONE_NUMBER: str = ""
+    TWILIO_VERIFY_SERVICE_SID: str = ""
 
     # Firebase
     FIREBASE_CREDENTIALS_PATH: str = "./firebase-credentials.json"
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
 
     # Google Maps
     GOOGLE_MAPS_API_KEY: str = ""
+
+    # Data.gov.in
+    DATA_GOV_API_KEY: str = ""
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

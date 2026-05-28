@@ -32,16 +32,16 @@ class SecuritySettings(BaseModel):
 
 class UserCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
-    email: EmailStr
     password: str = Field(..., min_length=6)
     phone: str = Field(..., min_length=10, max_length=15)
+    email: Optional[EmailStr] = None
     age: Optional[int] = None
     gender: Optional[str] = None
     address: Optional[str] = None
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    phone: str
     password: str
 
 
@@ -61,11 +61,18 @@ class UserUpdate(BaseModel):
     security_settings: Optional[SecuritySettings] = None
 
 
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+
+
 class UserResponse(BaseModel):
     id: str
     name: str
-    email: str
     phone: str
+    email: Optional[str] = None
     role: UserRole
     is_active: bool
     age: Optional[int] = None
@@ -91,9 +98,9 @@ class TokenResponse(BaseModel):
 class UserInDB(BaseModel):
     id: str
     name: str
-    email: str
     phone: str
     hashed_password: str
+    email: Optional[str] = None
     role: UserRole = UserRole.user
     is_active: bool = True
     age: Optional[int] = None

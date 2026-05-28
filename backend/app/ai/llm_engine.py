@@ -1,5 +1,5 @@
 # pyrefly: ignore [missing-import]
-import openai
+import httpx
 from app.core.config import settings
 from app.models.ai_prediction import DangerLevel
 # pyrefly: ignore [missing-import]
@@ -7,8 +7,6 @@ from loguru import logger
 from typing import Optional
 import json
 import re
-
-openai.api_key = settings.OPENAI_API_KEY
 
 SYSTEM_PROMPT = """You are an AI Safety Analysis Engine for SafeHer AI.
 
@@ -118,49 +116,60 @@ Be empathetic, calm, and direct. If you detect danger, clearly state it and prov
 Keep responses concise but helpful. If someone seems to be in danger, always prioritize their safety first."""
 
 
-async def analyze_text_for_danger(text: str, location: Optional[dict] = None) -> dict:
-    """Analyze text input for danger signals using GPT-4."""
-    if not settings.OPENAI_API_KEY:
-        return _mock_danger_analysis(text)
+async def _call_ollama(messages: list, format_json: bool = False, temperature: float = 0.2, max_tokens: int = 500) -> str:
+    url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
+    payload = {
+        "model": "phi3:mini",
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens
+        }
+    }
+    if format_json:
+        payload["format"] = "json"
 
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data["message"]["content"]
+
+
+async def analyze_text_for_danger(text: str, location: Optional[dict] = None) -> dict:
+    """Analyze text input for danger signals using local LLaMA 3."""
     try:
         location_context = ""
         if location:
             location_context = f"\nUser's current location: lat={location.get('latitude')}, lng={location.get('longitude')}"
 
-        response = openai.chat.completions.create(
-            model="gpt-4o",
+        content = await _call_ollama(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Analyze this for danger:\n\nText: \"{text}\"{location_context}"},
             ],
+            format_json=True,
             temperature=0.2,
-            max_tokens=500,
-            response_format={"type": "json_object"},
+            max_tokens=500
         )
 
-        result = json.loads(response.choices[0].message.content)
+        result = json.loads(content)
         logger.info(f"AI Analysis: danger_level={result.get('danger_level')}, trigger={result.get('trigger_emergency')}")
         return result
 
-    except openai.RateLimitError:
-        logger.error("OpenAI Quota Exceeded (429). Using fallback analysis.")
-        return _mock_danger_analysis(text, fallback_reason="OpenAI Quota Exceeded")
-    except openai.AuthenticationError:
-        logger.error("OpenAI Authentication Failed (401). Using fallback analysis.")
-        return _mock_danger_analysis(text, fallback_reason="OpenAI Auth Failed")
+    except httpx.RequestError as e:
+        logger.error(f"Ollama Connection Error: {e}. Using fallback analysis.")
+        return _mock_danger_analysis(text, fallback_reason="Ollama API Unreachable")
     except Exception as e:
-        logger.error(f"OpenAI analysis failed: {e}")
-        return _mock_danger_analysis(text)
+        logger.error(f"Ollama analysis failed: {e}")
+        return _mock_danger_analysis(text, fallback_reason="Ollama Error")
 
 
 async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, location: dict = None) -> dict:
     """
     Perform deep intelligence analysis on transcribed emergency audio and acoustic metadata.
     """
-    if not settings.OPENAI_API_KEY:
-        return _mock_audio_intelligence(transcript, acoustic_data)
-
     try:
         prompt = f"""
         TRANSCRIPT: "{transcript}"
@@ -183,24 +192,23 @@ async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, locat
         }}
         """
 
-        response = openai.chat.completions.create(
-            model="gpt-4o",
+        content = await _call_ollama(
             messages=[
                 {"role": "system", "content": "You are a Tactical Emergency Intelligence Engine."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.2,
-            response_format={"type": "json_object"},
+            format_json=True,
+            temperature=0.2
         )
 
-        return json.loads(response.choices[0].message.content)
+        return json.loads(content)
     except Exception as e:
         logger.error(f"Audio Intelligence analysis failed: {e}")
         return _mock_audio_intelligence(transcript, acoustic_data)
 
 
 def _mock_audio_intelligence(transcript: str, acoustic_data: dict) -> dict:
-    """Mock audio intelligence assessment for fallback when OpenAI fails."""
+    """Mock audio intelligence assessment for fallback when LLM fails."""
     transcript_lower = (transcript or "").lower()
     
     # Base risk level from acoustic stress score if available
@@ -237,9 +245,6 @@ def _mock_audio_intelligence(transcript: str, acoustic_data: dict) -> dict:
 
 async def chat_with_safeher(message: str, history: list = None) -> dict:
     """AI safety chatbot conversation."""
-    if not settings.OPENAI_API_KEY:
-        return _mock_chat_response(message)
-
     try:
         messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
 
@@ -248,14 +253,11 @@ async def chat_with_safeher(message: str, history: list = None) -> dict:
 
         messages.append({"role": "user", "content": message})
 
-        response = openai.chat.completions.create(
-            model="gpt-4o",
+        reply = await _call_ollama(
             messages=messages,
             temperature=0.7,
-            max_tokens=300,
+            max_tokens=300
         )
-
-        reply = response.choices[0].message.content
 
         # Check reply for danger indicators
         danger_keywords = ["call police", "emergency", "danger", "unsafe", "threat", "attack", "help"]
@@ -274,14 +276,6 @@ async def chat_with_safeher(message: str, history: list = None) -> dict:
 
 async def predict_area_risk(latitude: float, longitude: float, time_of_day: str = None) -> dict:
     """Predict risk level of an area based on location and time."""
-    if not settings.OPENAI_API_KEY:
-        return {
-            "risk_level": "medium",
-            "confidence": 0.6,
-            "factors": ["Limited lighting at night", "Low pedestrian activity"],
-            "recommendation": "Stay in well-lit areas and keep emergency contacts updated.",
-        }
-
     try:
         prompt = f"""
         Assess safety risk for a woman alone at:
@@ -293,18 +287,17 @@ async def predict_area_risk(latitude: float, longitude: float, time_of_day: str 
         "factors": ["list"], "recommendation": "advice"}}
         """
 
-        response = openai.chat.completions.create(
-            model="gpt-4o",
+        content = await _call_ollama(
             messages=[
                 {"role": "system", "content": "You are a women's safety risk analyst."},
                 {"role": "user", "content": prompt},
             ],
+            format_json=True,
             temperature=0.3,
-            max_tokens=200,
-            response_format={"type": "json_object"},
+            max_tokens=200
         )
 
-        return json.loads(response.choices[0].message.content)
+        return json.loads(content)
 
     except Exception as e:
         logger.error(f"Area risk prediction failed: {e}")
@@ -312,7 +305,7 @@ async def predict_area_risk(latitude: float, longitude: float, time_of_day: str 
 
 
 def _mock_danger_analysis(text: str, fallback_reason: str = None) -> dict:
-    """Mock analysis when OpenAI is not configured or fails."""
+    """Mock analysis when LLM is not configured or fails."""
     text_lower = text.lower()
     
     # Base response

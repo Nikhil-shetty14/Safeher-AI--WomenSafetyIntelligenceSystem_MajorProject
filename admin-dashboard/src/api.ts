@@ -29,6 +29,8 @@ export const adminAPI = {
     api.get(`/api/admin/alerts/recent?limit=${limit}`),
   getUsers: (skip = 0, limit = 50) =>
     api.get(`/api/admin/users?skip=${skip}&limit=${limit}`),
+  updateUser: (id: string, data: any) => 
+    api.put(`/api/admin/users/${id}`, data),
   getLiveUsers: () => api.get('/api/admin/live-users'),
   getActiveAlerts: () => api.get('/api/admin/alerts/active'),
   getHeatmap: () => api.get('/api/admin/alerts/heatmap'),

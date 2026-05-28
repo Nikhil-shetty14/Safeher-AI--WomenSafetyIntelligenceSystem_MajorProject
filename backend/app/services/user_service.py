@@ -13,17 +13,17 @@ async def create_user(user_data: UserCreate) -> dict:
     if collection is None:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-    existing = await collection.find_one({"email": user_data.email})
+    existing = await collection.find_one({"phone": user_data.phone})
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Phone number already registered")
 
     user_id = str(uuid.uuid4())
     now = datetime.utcnow()
     user_doc = {
         "_id": user_id,
         "name": user_data.name,
-        "email": user_data.email,
         "phone": user_data.phone,
+        "email": user_data.email,
         "hashed_password": get_password_hash(user_data.password),
         "role": UserRole.user.value,
         "is_active": True,
@@ -60,12 +60,12 @@ async def create_user(user_data: UserCreate) -> dict:
     return user_doc
 
 
-async def authenticate_user(email: str, password: str) -> Optional[dict]:
+async def authenticate_user(phone: str, password: str) -> Optional[dict]:
     collection = get_collection("users")
     if collection is None:
         return None
 
-    user = await collection.find_one({"email": email})
+    user = await collection.find_one({"phone": phone})
     if not user:
         return None
     if not verify_password(password, user["hashed_password"]):
@@ -111,8 +111,8 @@ def format_user_response(user: dict) -> dict:
     return {
         "id": user["_id"],
         "name": user["name"],
-        "email": user["email"],
         "phone": user["phone"],
+        "email": user.get("email"),
         "role": user.get("role", "user"),
         "is_active": user.get("is_active", True),
         "age": user.get("age"),

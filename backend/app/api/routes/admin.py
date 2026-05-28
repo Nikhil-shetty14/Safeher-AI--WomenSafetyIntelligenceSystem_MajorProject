@@ -3,6 +3,7 @@ from app.core.security import get_current_admin
 from app.core.database import get_collection
 from app.services.alert_service import get_active_alerts, format_alert_response
 from app.services.user_service import get_all_users
+from app.models.user import AdminUserUpdate
 from app.websockets.socket_manager import get_connected_count
 from datetime import datetime, timedelta
 from loguru import logger
@@ -104,16 +105,45 @@ async def list_users(
     users = await get_all_users(skip, limit)
     return [
         {
-            "id": u["_id"],
-            "name": u["name"],
-            "email": u["email"],
-            "phone": u["phone"],
+            "id": u.get("_id"),
+            "name": u.get("name"),
+            "email": u.get("email"),
+            "phone": u.get("phone"),
             "role": u.get("role", "user"),
             "is_active": u.get("is_active", True),
-            "created_at": u["created_at"],
+            "created_at": u.get("created_at"),
         }
         for u in users
     ]
+
+
+@router.put("/users/{user_id}")
+async def update_user(
+    user_id: str,
+    update_data: AdminUserUpdate,
+    _: dict = Depends(get_current_admin)
+):
+    """Update a user's details (admin only)."""
+    users_col = get_collection("users")
+    if users_col is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+    if not update_dict:
+        return {"success": True, "message": "No fields to update"}
+        
+    update_dict["updated_at"] = datetime.utcnow()
+
+    result = await users_col.update_one(
+        {"_id": user_id},
+        {"$set": update_dict}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    logger.info(f"ADMIN ACTION | Updated user {user_id}")
+    return {"success": True, "message": f"User {user_id} updated"}
 
 
 @router.get("/alerts/heatmap")

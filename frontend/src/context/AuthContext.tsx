@@ -25,8 +25,10 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (data: any) => Promise<void>;
+  login: (phone: string, password: string) => Promise<any>;
+  register: (data: any) => Promise<any>;
+  verifyOTP: (sessionId: string, code: string) => Promise<any>;
+  resendOTP: (sessionId: string) => Promise<any>;
   logout: () => Promise<void>;
   updateUser: (data: Partial<User>) => void;
 }
@@ -59,22 +61,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (email: string, password: string) => {
-    const res = await authAPI.login({ email, password });
+  const login = async (phone: string, password: string) => {
+    const res = await authAPI.login({ phone, password });
+    if (res.data.status === '2fa_pending') {
+      return res.data;
+    }
     const { access_token, user: userData } = res.data;
     await AsyncStorage.setItem('safeher_token', access_token);
     await AsyncStorage.setItem('safeher_user', JSON.stringify(userData));
     setToken(access_token);
     setUser(userData);
+    return res.data;
   };
 
   const register = async (data: any) => {
     const res = await authAPI.register(data);
+    if (res.data.status === '2fa_pending') {
+      return res.data;
+    }
     const { access_token, user: userData } = res.data;
     await AsyncStorage.setItem('safeher_token', access_token);
     await AsyncStorage.setItem('safeher_user', JSON.stringify(userData));
     setToken(access_token);
     setUser(userData);
+    return res.data;
+  };
+
+  const verifyOTP = async (sessionId: string, code: string) => {
+    const res = await authAPI.verifyOTP({ session_id: sessionId, code });
+    const { access_token, user: userData } = res.data;
+    await AsyncStorage.setItem('safeher_token', access_token);
+    await AsyncStorage.setItem('safeher_user', JSON.stringify(userData));
+    setToken(access_token);
+    setUser(userData);
+    return res.data;
+  };
+
+  const resendOTP = async (sessionId: string) => {
+    const res = await authAPI.resendOTP({ session_id: sessionId });
+    return res.data;
   };
 
   const logout = async () => {
@@ -100,7 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       token,
       isLoading,
       isAuthenticated: !!token,
-      login, register, logout, updateUser,
+      login, register, verifyOTP, resendOTP, logout, updateUser,
     }}>
       {children}
     </AuthContext.Provider>

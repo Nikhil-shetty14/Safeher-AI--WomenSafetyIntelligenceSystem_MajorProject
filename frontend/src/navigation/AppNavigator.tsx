@@ -11,6 +11,7 @@ import { Colors } from '../constants/theme';
 // Screens
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
+import OTPVerifyScreen from '../screens/OTPVerifyScreen';
 import HomeScreen from '../screens/HomeScreen';
 import SOSScreen from '../screens/SOSScreen';
 import MapScreen from '../screens/MapScreen';
@@ -108,6 +109,7 @@ export default function AppNavigator() {
           <>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Register" component={RegisterScreen} />
+            <Stack.Screen name="OTPVerify" component={OTPVerifyScreen} />
           </>
         )}
       </Stack.Navigator>

@@ -1,11 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { adminAPI } from './api';
-import { Shield, Mail, Phone, Calendar } from 'lucide-react';
+import { Shield, Mail, Phone, Calendar, Edit2, Check, X } from 'lucide-react';
 
 export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all');
   const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -16,11 +20,35 @@ export default function UsersPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = users.filter(u =>
-    u.name?.toLowerCase().includes(search.toLowerCase()) ||
-    u.email?.toLowerCase().includes(search.toLowerCase()) ||
-    u.phone?.includes(search)
-  );
+  const filtered = users.filter(u => {
+    const matchesSearch = u.name?.toLowerCase().includes(search.toLowerCase()) ||
+                          u.email?.toLowerCase().includes(search.toLowerCase()) ||
+                          u.phone?.includes(search);
+    const matchesRole = roleFilter === 'all' || u.role === roleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  const startEdit = (u: any) => {
+    setEditingId(u.id);
+    setEditForm({ name: u.name, phone: u.phone, role: u.role, is_active: u.is_active });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditForm({});
+  };
+
+  const saveEdit = async (id: string) => {
+    setSaving(true);
+    try {
+      await adminAPI.updateUser(id, editForm);
+      setEditingId(null);
+      load();
+    } catch (err) {
+      alert("Failed to update user");
+    }
+    setSaving(false);
+  };
 
   return (
     <div style={s.page}>
@@ -33,33 +61,108 @@ export default function UsersPage() {
           onChange={e => setSearch(e.target.value)} />
       </div>
 
+      <div style={s.tabs}>
+        <button 
+          style={roleFilter === 'all' ? s.tabActive : s.tab} 
+          onClick={() => setRoleFilter('all')}
+        >All Users</button>
+        <button 
+          style={roleFilter === 'admin' ? s.tabActive : s.tab} 
+          onClick={() => setRoleFilter('admin')}
+        >Administrators</button>
+        <button 
+          style={roleFilter === 'user' ? s.tabActive : s.tab} 
+          onClick={() => setRoleFilter('user')}
+        >Regular Users</button>
+      </div>
+
       {loading ? (
         <p style={{ color:'#6b5a8a', padding:24 }}>Loading users...</p>
       ) : (
         <div style={s.grid}>
-          {filtered.map(u => (
-            <div key={u.id} className="card" style={s.userCard}>
+          {filtered.map(u => {
+            const isEditing = editingId === u.id;
+            return (
+            <div key={u.id} className="glass-card" style={{ ...s.userCard, padding: 20 }}>
               <div style={s.cardTop}>
                 <div style={s.avatar}>{u.name?.[0]?.toUpperCase() || '?'}</div>
                 <div style={s.userInfo}>
-                  <p style={s.name}>{u.name}</p>
-                  <span className={`badge ${u.role === 'admin' ? 'badge-critical' : 'badge-safe'}`}>
-                    {u.role === 'admin' && <Shield size={10} />} {u.role}
-                  </span>
+                  {isEditing ? (
+                    <input 
+                      style={s.editInput} 
+                      value={editForm.name} 
+                      onChange={e => setEditForm({...editForm, name: e.target.value})}
+                    />
+                  ) : (
+                    <p style={s.name}>{u.name}</p>
+                  )}
+                  {isEditing ? (
+                    <select 
+                      style={s.editSelect}
+                      value={editForm.role}
+                      onChange={e => setEditForm({...editForm, role: e.target.value})}
+                    >
+                      <option value="user">user</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  ) : (
+                    <span className={`badge ${u.role === 'admin' ? 'badge-critical' : 'badge-safe'}`}>
+                      {u.role === 'admin' && <Shield size={10} />} {u.role}
+                    </span>
+                  )}
                 </div>
-                <div style={{ ...s.activeDot,
-                  background: u.is_active ? '#10b981' : '#ef4444' }} />
+                {isEditing ? (
+                  <select 
+                    style={{...s.editSelect, position: 'absolute', top: 0, right: 0}}
+                    value={editForm.is_active ? 'true' : 'false'}
+                    onChange={e => setEditForm({...editForm, is_active: e.target.value === 'true'})}
+                  >
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                  </select>
+                ) : (
+                  <div style={{ ...s.activeDot,
+                    background: u.is_active ? '#10b981' : '#ef4444' }} />
+                )}
               </div>
               <div style={s.details}>
-                <div style={s.detailRow}><Mail size={13} color="#6b5a8a" /><span>{u.email}</span></div>
-                <div style={s.detailRow}><Phone size={13} color="#6b5a8a" /><span>{u.phone}</span></div>
+                <div style={s.detailRow}><Mail size={13} color="#6b5a8a" /><span>{u.email || 'No email'}</span></div>
+                <div style={s.detailRow}>
+                  <Phone size={13} color="#6b5a8a" />
+                  {isEditing ? (
+                    <input 
+                      style={s.editInput} 
+                      value={editForm.phone}
+                      onChange={e => setEditForm({...editForm, phone: e.target.value})}
+                    />
+                  ) : (
+                    <span>{u.phone}</span>
+                  )}
+                </div>
                 <div style={s.detailRow}>
                   <Calendar size={13} color="#6b5a8a" />
                   <span>Joined {new Date(u.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
+              
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {isEditing ? (
+                  <>
+                    <button onClick={() => saveEdit(u.id)} disabled={saving} style={{...s.actionBtn, background: '#10b981'}}>
+                      <Check size={14} color="#fff" />
+                    </button>
+                    <button onClick={cancelEdit} disabled={saving} style={{...s.actionBtn, background: '#ef4444'}}>
+                      <X size={14} color="#fff" />
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => startEdit(u)} style={{...s.actionBtn, background: '#8b5cf6'}}>
+                    <Edit2 size={12} color="#fff" /> <span style={{fontSize: 12}}>Edit</span>
+                  </button>
+                )}
+              </div>
             </div>
-          ))}
+          )})}
           {filtered.length === 0 && (
             <p style={{ color:'#6b5a8a', gridColumn:'1/-1', textAlign:'center', padding:40 }}>
               No users found
@@ -77,6 +180,9 @@ const s: Record<string, React.CSSProperties> = {
   title: { fontSize:24, fontWeight:800, color:'#f8f4ff' },
   sub: { fontSize:12, color:'#6b5a8a', marginTop:2 },
   search: { width:260 },
+  tabs: { display: 'flex', gap: 8, marginBottom: 24 },
+  tab: { padding: '8px 16px', borderRadius: 8, background: 'rgba(255,255,255,0.05)', color: '#b8a9d9', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', fontSize: 13, fontWeight: 600, transition: 'all 0.2s' },
+  tabActive: { padding: '8px 16px', borderRadius: 8, background: '#8b5cf6', color: '#fff', border: '1px solid #8b5cf6', cursor: 'pointer', fontSize: 13, fontWeight: 600, transition: 'all 0.2s', boxShadow: '0 4px 12px rgba(139,92,246,0.3)' },
   grid: { display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:16 },
   userCard: { transition:'transform 0.2s, box-shadow 0.2s', cursor:'default' },
   cardTop: { display:'flex', alignItems:'center', gap:12, marginBottom:16, position:'relative' },
@@ -89,4 +195,7 @@ const s: Record<string, React.CSSProperties> = {
   activeDot: { width:10, height:10, borderRadius:5, position:'absolute', top:0, right:0 },
   details: { display:'flex', flexDirection:'column', gap:8 },
   detailRow: { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#b8a9d9' },
+  editInput: { background: 'rgba(255,255,255,0.1)', border: '1px solid #8b5cf6', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: 13, outline: 'none', width: '100%' },
+  editSelect: { background: '#2d1b4e', border: '1px solid #8b5cf6', color: '#fff', padding: '2px 4px', borderRadius: 4, fontSize: 12, outline: 'none' },
+  actionBtn: { display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontWeight: 600 },
 };

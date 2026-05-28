@@ -1,15 +1,29 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable react-hooks/purity */
 import React, { useEffect, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { adminAPI } from './api';
 import { useSocket } from './SocketContext';
 import {
-  Users, AlertTriangle, Shield, Activity,
-  TrendingUp, Wifi, Zap, Brain, MessageSquare,
-  Clock, MapPin, ChevronRight, PlayCircle
+  AlertTriangle, Shield, Activity,
+  Wifi, Zap, Brain,
+  Clock, MapPin, ChevronRight
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, Legend, BarChart, Bar
+  ResponsiveContainer
 } from 'recharts';
+
+const mockTrends = [
+  { name: '00:00', alerts: 2, risk: 10 },
+  { name: '04:00', alerts: 1, risk: 5 },
+  { name: '08:00', alerts: 5, risk: 35 },
+  { name: '12:00', alerts: 8, risk: 65 },
+  { name: '16:00', alerts: 12, risk: 85 },
+  { name: '20:00', alerts: 9, risk: 70 },
+];
 
 interface Stats {
   total_users: number; active_alerts: number; total_alerts_today: number;
@@ -74,7 +88,21 @@ export default function Dashboard() {
       setLogs(prev => [log, ...prev].slice(0, 20));
     };
 
-    socket.on('new_sos_alert', (d) => handler(d, 'SOS_ALERT'));
+    socket.on('new_sos_alert', (d) => {
+      handler(d, 'SOS_ALERT');
+      setAlerts(prev => {
+        if (prev.find(a => a.id === d.alert_id)) return prev;
+        const newAlert = {
+          id: d.alert_id,
+          user_id: d.user_id,
+          user_name: d.user_name,
+          severity: d.severity,
+          location: d.location,
+          created_at: d.location?.timestamp || new Date().toISOString()
+        };
+        return [newAlert, ...prev];
+      });
+    });
     socket.on('user_location_update', (d) => handler(d, 'TRACKING'));
     socket.on('ai_prediction', (d) => handler(d, 'AI_INTEL'));
 
@@ -122,14 +150,7 @@ export default function Dashboard() {
     return () => clearInterval(t);
   }, [load]);
 
-  const mockTrends = [
-    { name: '00:00', alerts: 2, risk: 10 },
-    { name: '04:00', alerts: 1, risk: 5 },
-    { name: '08:00', alerts: 5, risk: 35 },
-    { name: '12:00', alerts: 8, risk: 65 },
-    { name: '16:00', alerts: 12, risk: 85 },
-    { name: '20:00', alerts: 9, risk: 70 },
-  ];
+
 
   if (loading) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -138,7 +159,12 @@ export default function Dashboard() {
   );
 
   return (
-    <div style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      style={{ flex: 1, padding: '24px', overflowY: 'auto' }}
+    >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '24px' }}>
         <div>
@@ -179,14 +205,14 @@ export default function Dashboard() {
       )}
 
       {/* Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '24px' }}>
+      <div className="dashboard-grid-stats">
         <StatCard icon={AlertTriangle} label="Active SOS" value={stats?.active_alerts} color="#ef4444" sub="Immediate response required" />
         <StatCard icon={Zap} label="Response Time" value="2.4m" color="#f59e0b" sub="Average dispatch latency" />
         <StatCard icon={Wifi} label="Live Tracking" value={stats?.live_tracking_users} color="#06b6d4" sub="Users currently monitored" />
         <StatCard icon={Brain} label="AI Danger Index" value="14%" color="#10b981" sub="Overall city threat level" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1fr', gap: '24px' }}>
+      <div className="dashboard-grid-main">
         {/* Main Chart Area */}
         <div className="glass-card" style={{ padding: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -245,8 +271,14 @@ export default function Dashboard() {
       </div>
 
       {/* Bottom Section: Alerts & Audio */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '24px', marginTop: '24px' }}>
-        <div className="glass-card" style={{ padding: '24px' }}>
+      <div className="dashboard-grid-bottom">
+        <motion.div 
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="glass-card" 
+          style={{ padding: '24px' }}
+        >
           <h3 style={{ fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
             <AlertTriangle size={18} color="#ef4444" /> Live Emergency Queue
           </h3>
@@ -286,7 +318,7 @@ export default function Dashboard() {
               ))
             )}
           </div>
-        </div>
+        </motion.div>
 
         {/* Media & Tactical Intelligence Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -331,7 +363,20 @@ export default function Dashboard() {
                    </div>
                 </div>
 
-                <div style={{ marginTop: '8px' }}>
+                <div style={{ marginTop: '8px', padding: '12px', background: 'rgba(139, 92, 246, 0.05)', borderRadius: '8px', border: '1px solid rgba(139, 92, 246, 0.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <p style={{ color: '#a78bfa', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Live Audio Evidence</p>
+                    <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
+                        <motion.div 
+                          key={i}
+                          animate={{ height: ['4px', `${Math.random() * 12 + 4}px`, '4px'] }}
+                          transition={{ repeat: Infinity, duration: 0.5 + Math.random() * 0.5 }}
+                          style={{ width: '3px', background: '#ef4444', borderRadius: '2px' }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                   <audio controls style={{ width: '100%', height: '32px' }}>
                     <source src={`${adminAPI.defaults.baseURL}/api/sos/audio/${tacticalIntel.alert_id}`} type="audio/wav" />
                   </audio>
@@ -476,6 +521,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

@@ -20,6 +20,7 @@ async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None)
 
     # Determine severity from AI analysis
     severity = AlertSeverity.high.value
+    priority_score = 3
     if ai_analysis:
         danger_level = ai_analysis.get("danger_level", "high")
         severity_map = {
@@ -29,7 +30,52 @@ async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None)
             "high": AlertSeverity.high.value,
             "critical": AlertSeverity.critical.value,
         }
+        priority_map = {
+            "safe": 1,
+            "low": 2,
+            "medium": 3,
+            "high": 4,
+            "critical": 5
+        }
         severity = severity_map.get(danger_level, AlertSeverity.high.value)
+        priority_score = priority_map.get(danger_level, 4)
+
+    # Validate incoming location; if invalid or (0,0), attempt to use last known location from history
+    loc_obj = alert_data.location.dict()
+    lat = loc_obj.get("latitude")
+    lng = loc_obj.get("longitude")
+    try:
+        lat_f = float(lat) if lat is not None else None
+    except Exception:
+        lat_f = None
+    try:
+        lng_f = float(lng) if lng is not None else None
+    except Exception:
+        lng_f = None
+
+    need_fallback = False
+    if lat_f is None or lng_f is None:
+        need_fallback = True
+    else:
+        # treat obvious invalid 0,0 as missing
+        if abs(lat_f) < 1e-6 and abs(lng_f) < 1e-6:
+            need_fallback = True
+
+    if need_fallback:
+        try:
+            lh_col = get_collection("location_history")
+            if lh_col is not None:
+                last = await lh_col.find_one({"user_id": alert_data.user_id}, sort=[("timestamp", -1)])
+                if last and last.get("latitude") is not None and last.get("longitude") is not None:
+                    loc_obj = {
+                        "latitude": last.get("latitude"),
+                        "longitude": last.get("longitude"),
+                        "accuracy": last.get("accuracy"),
+                        "timestamp": last.get("timestamp"),
+                    }
+                    logger.info(f"Alert {alert_id}: used fallback location from history for user {alert_data.user_id}")
+        except Exception as e:
+            logger.warning(f"Could not lookup fallback location: {e}")
 
     alert_doc = {
         "_id": alert_id,
@@ -37,11 +83,12 @@ async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None)
         "trigger_type": alert_data.trigger_type,
         "severity": severity,
         "status": AlertStatus.active.value,
-        "location": alert_data.location.dict(),
+        "location": loc_obj,
         "message": alert_data.message,
         "ai_analysis": ai_analysis,
         "audio_file_path": alert_data.audio_file_path,
         "contacts_notified": [],
+        "priority_score": priority_score,
         "created_at": now,
         "resolved_at": None,
     }
@@ -146,7 +193,7 @@ async def get_active_alerts(skip: int = 0, limit: int = 50) -> List[dict]:
     collection = get_collection("alerts")
     if collection is None:
         return []
-    cursor = collection.find({"status": "active"}).sort("created_at", -1).skip(skip).limit(limit)
+    cursor = collection.find({"status": "active"}).sort([("priority_score", -1), ("created_at", -1)]).skip(skip).limit(limit)
     return await cursor.to_list(length=limit)
 
 
@@ -195,6 +242,7 @@ async def format_alert_response(alert: dict) -> dict:
         "ai_analysis": alert.get("ai_analysis"),
         "audio_file_path": alert.get("audio_file_path"),
         "contacts_notified": alert.get("contacts_notified", []),
+        "priority_score": alert.get("priority_score", 0),
         "created_at": alert["created_at"],
         "resolved_at": alert.get("resolved_at"),
     }

@@ -10,7 +10,7 @@ import { Colors, Typography, Spacing, BorderRadius } from '../constants/theme';
 
 export default function LoginScreen({ navigation }: any) {
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -31,14 +31,21 @@ export default function LoginScreen({ navigation }: any) {
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
+    if (!phone.trim() || !password.trim()) {
       shake();
-      Alert.alert('Missing Fields', 'Please enter your email and password.');
+      Alert.alert('Missing Fields', 'Please enter your phone number and password.');
       return;
     }
     setLoading(true);
     try {
-      await login(email.trim().toLowerCase(), password);
+      const res = await login(phone.trim(), password);
+      if (res && res.status === '2fa_pending') {
+        navigation.navigate('OTPVerify', {
+          session_id: res.session_id,
+          phone: res.phone,
+          action: 'login',
+        });
+      }
     } catch (err: any) {
       shake();
       Alert.alert('Login Failed', err?.response?.data?.detail || 'Invalid credentials. Please try again.');
@@ -67,14 +74,14 @@ export default function LoginScreen({ navigation }: any) {
             <Text style={styles.subheading}>Stay safe, stay connected</Text>
 
             <View style={styles.inputGroup}>
-              <Ionicons name="mail-outline" size={20} color={Colors.textMuted} style={styles.inputIcon} />
+              <Ionicons name="call-outline" size={20} color={Colors.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Email address"
+                placeholder="Phone number"
                 placeholderTextColor={Colors.textMuted}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
                 autoCapitalize="none"
               />
             </View>

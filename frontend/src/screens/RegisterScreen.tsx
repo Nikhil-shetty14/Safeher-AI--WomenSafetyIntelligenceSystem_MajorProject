@@ -30,7 +30,7 @@ const Field = ({ icon, placeholder, field, form, set, secure, showPass, setShowP
 
 export default function RegisterScreen({ navigation }: any) {
   const { register } = useAuth();
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ name: '', phone: '', password: '', confirm: '' });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -42,8 +42,8 @@ export default function RegisterScreen({ navigation }: any) {
   const set = (field: string) => (val: string) => setForm((p) => ({ ...p, [field]: val }));
 
   const handleRegister = async () => {
-    const { name, email, phone, password, confirm } = form;
-    if (!name || !email || !phone || !password) {
+    const { name, phone, password, confirm } = form;
+    if (!name || !phone || !password) {
       return Alert.alert('Missing Fields', 'Please fill in all required fields.');
     }
     if (password !== confirm) {
@@ -54,7 +54,14 @@ export default function RegisterScreen({ navigation }: any) {
     }
     setLoading(true);
     try {
-      await register({ name, email: email.toLowerCase(), phone, password });
+      const res = await register({ name, phone, password });
+      if (res && res.status === '2fa_pending') {
+        navigation.navigate('OTPVerify', {
+          session_id: res.session_id,
+          phone: res.phone,
+          action: 'signup',
+        });
+      }
     } catch (err: any) {
       Alert.alert('Registration Failed', err?.response?.data?.detail || 'Something went wrong.');
     } finally {
@@ -81,7 +88,6 @@ export default function RegisterScreen({ navigation }: any) {
 
           <View style={styles.formCard}>
             <Field icon="person-outline" placeholder="Full Name" field="name" form={form} set={set} />
-            <Field icon="mail-outline" placeholder="Email Address" field="email" form={form} set={set} keyboard="email-address" />
             <Field icon="call-outline" placeholder="Phone Number (+91...)" field="phone" form={form} set={set} keyboard="phone-pad" />
             <Field icon="lock-closed-outline" placeholder="Password" field="password" form={form} set={set} secure showPass={showPass} setShowPass={setShowPass} />
             <Field icon="shield-checkmark-outline" placeholder="Confirm Password" field="confirm" form={form} set={set} secure showPass={showPass} setShowPass={setShowPass} />

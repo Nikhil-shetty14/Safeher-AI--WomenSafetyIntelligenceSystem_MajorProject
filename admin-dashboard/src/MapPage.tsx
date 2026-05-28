@@ -85,11 +85,11 @@ export default function MapPage() {
       {/* Map Control Overlay */}
       <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="glass-card" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <button style={s.toolBtn} title="Global View"><MapIcon size={20} /></button>
-          <button style={s.toolBtn} title="Live Heatmap"><Layers size={20} /></button>
-          <button style={s.toolBtn} title="User Tracking"><Users size={20} /></button>
+          <button className="map-tool-btn" title="Global View"><MapIcon size={20} /></button>
+          <button className="map-tool-btn" title="Live Heatmap"><Layers size={20} /></button>
+          <button className="map-tool-btn" title="User Tracking"><Users size={20} /></button>
           <div style={{ height: '1px', background: 'var(--border)' }} />
-          <button style={s.toolBtn} title="Settings"><Settings size={20} /></button>
+          <button className="map-tool-btn" title="Settings"><Settings size={20} /></button>
         </div>
       </div>
 

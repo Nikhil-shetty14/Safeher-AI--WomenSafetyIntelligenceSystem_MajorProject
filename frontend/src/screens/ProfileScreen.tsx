@@ -63,17 +63,23 @@ const SettingRow = ({ icon, label, value, onPress, toggle, toggleVal, onToggle, 
   </TouchableOpacity>
 );
 
-const InfoInput = ({ label, value, onChangeText, placeholder, keyboardType }: any) => (
+const InfoInput = ({ label, value, onChangeText, placeholder, keyboardType, editable = true }: any) => (
   <View style={styles.inputContainer}>
     <Text style={styles.inputLabel}>{label}</Text>
-    <TextInput
-      style={styles.textInput}
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={Colors.textMuted}
-      keyboardType={keyboardType}
-    />
+    {editable ? (
+      <TextInput
+        style={styles.textInput}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={Colors.textMuted}
+        keyboardType={keyboardType}
+      />
+    ) : (
+      <Text style={[styles.textInput, { color: value ? Colors.textPrimary : Colors.textMuted, paddingVertical: 4 }]}>
+        {value || placeholder}
+      </Text>
+    )}
   </View>
 );
 
@@ -82,6 +88,7 @@ export default function ProfileScreen({ navigation }: any) {
   const { isConnected } = useSocket();
   
   const [loading, setLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [historySummary, setHistorySummary] = useState<any>(null);
 
@@ -102,7 +109,6 @@ export default function ProfileScreen({ navigation }: any) {
   // Profile Fields
   const [profileData, setProfileData] = useState<any>({
     name: user?.name || '',
-    email: user?.email || '',
     phone: user?.phone || '',
     age: user?.age?.toString() || '',
     gender: user?.gender || '',
@@ -141,7 +147,6 @@ export default function ProfileScreen({ navigation }: any) {
       updateUser(userData);
       setProfileData({
         name: userData.name,
-        email: userData.email,
         phone: userData.phone,
         age: userData.age?.toString() || '',
         gender: userData.gender || '',
@@ -175,6 +180,7 @@ export default function ProfileScreen({ navigation }: any) {
         age: profileData.age ? parseInt(profileData.age) : null,
       });
       updateUser(res.data);
+      setIsEditing(false);
       Alert.alert('Success', 'Profile updated successfully');
     } catch (error) {
       Alert.alert('Error', 'Failed to update profile');
@@ -273,9 +279,15 @@ export default function ProfileScreen({ navigation }: any) {
             <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Profile & Security</Text>
-          <TouchableOpacity onPress={handleUpdateProfile} disabled={loading}>
-            {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={styles.saveBtn}>Save</Text>}
-          </TouchableOpacity>
+          {isEditing ? (
+            <TouchableOpacity onPress={handleUpdateProfile} disabled={loading}>
+              {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={styles.saveBtn}>Save</Text>}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={() => setIsEditing(true)}>
+              <Text style={styles.saveBtn}>Edit</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Profile Info Card */}
@@ -295,7 +307,6 @@ export default function ProfileScreen({ navigation }: any) {
           </TouchableOpacity>
           
           <Text style={styles.profileName}>{user?.name}</Text>
-          <Text style={styles.profileEmail}>{user?.email}</Text>
           
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
@@ -320,6 +331,7 @@ export default function ProfileScreen({ navigation }: any) {
             value={profileData.name} 
             onChangeText={(t: string) => setProfileData({...profileData, name: t})}
             placeholder="Enter your name"
+            editable={isEditing}
           />
           <InfoInput 
             label="Phone Number" 
@@ -327,6 +339,7 @@ export default function ProfileScreen({ navigation }: any) {
             onChangeText={(t: string) => setProfileData({...profileData, phone: t})}
             placeholder="Enter phone number"
             keyboardType="phone-pad"
+            editable={isEditing}
           />
           <View style={styles.rowInputs}>
             <View style={{ flex: 1 }}>
@@ -336,6 +349,7 @@ export default function ProfileScreen({ navigation }: any) {
                 onChangeText={(t: string) => setProfileData({...profileData, age: t})}
                 placeholder="Years"
                 keyboardType="numeric"
+                editable={isEditing}
               />
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
@@ -344,6 +358,7 @@ export default function ProfileScreen({ navigation }: any) {
                 value={profileData.gender} 
                 onChangeText={(t: string) => setProfileData({...profileData, gender: t})}
                 placeholder="Gender"
+                editable={isEditing}
               />
             </View>
           </View>
@@ -352,6 +367,7 @@ export default function ProfileScreen({ navigation }: any) {
             value={profileData.address} 
             onChangeText={(t: string) => setProfileData({...profileData, address: t})}
             placeholder="Set your home address"
+            editable={isEditing}
           />
         </Section>
 
@@ -370,6 +386,7 @@ export default function ProfileScreen({ navigation }: any) {
                 value={profileData.blood_group} 
                 onChangeText={(t: string) => setProfileData({...profileData, blood_group: t})}
                 placeholder="e.g. O+"
+                editable={isEditing}
               />
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
@@ -378,6 +395,7 @@ export default function ProfileScreen({ navigation }: any) {
                 value={profileData.allergies} 
                 onChangeText={(t: string) => setProfileData({...profileData, allergies: t})}
                 placeholder="e.g. Peanuts"
+                editable={isEditing}
               />
             </View>
           </View>
@@ -386,6 +404,7 @@ export default function ProfileScreen({ navigation }: any) {
             value={profileData.medical_conditions} 
             onChangeText={(t: string) => setProfileData({...profileData, medical_conditions: t})}
             placeholder="Any conditions..."
+            editable={isEditing}
           />
         </Section>
 
@@ -510,7 +529,7 @@ export default function ProfileScreen({ navigation }: any) {
           <SettingRow 
             icon="create-outline" 
             label="Change Password" 
-            onPress={() => Alert.alert('Security', 'Please check your email to reset password.')} 
+            onPress={() => Alert.alert('Security', 'Please check your SMS to reset password.')} 
           />
           <SettingRow 
             icon="shield-checkmark-outline" 
@@ -622,7 +641,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.card,
   },
   profileName: { fontSize: Typography.fontSize2XL, fontWeight: Typography.fontWeightBold, color: Colors.textPrimary },
-  profileEmail: { fontSize: Typography.fontSizeMD, color: Colors.textSecondary, marginTop: 4 },
   statsRow: {
     flexDirection: 'row',
     marginTop: Spacing.xl,

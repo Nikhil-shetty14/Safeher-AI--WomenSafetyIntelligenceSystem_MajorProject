@@ -12,6 +12,7 @@ from app.websockets.socket_manager import broadcast_to_admins
 from app.core.database import get_collection
 from loguru import logger
 import os, uuid, aiofiles, traceback, shutil
+from fastapi import Body
 
 router = APIRouter(prefix="/api/sos", tags=["SOS Alerts"])
 
@@ -104,12 +105,9 @@ async def trigger_sos(
             "sms_status": sms_status,
             "alert": alert_doc
         }
-
     except Exception as e:
         logger.error(f"SOS TRIGGER CRITICAL ERROR: {str(e)}")
         traceback.print_exc()
-        
-        # Fallback return to prevent ASGI app crashes
         return {
             "success": False,
             "message": f"SOS trigger failed internally: {str(e)}",
@@ -117,6 +115,58 @@ async def trigger_sos(
             "sms_status": "failed",
             "alert": None
         }
+
+
+@router.post("/trigger-test")
+async def trigger_sos_test(
+    user_id: str = Body(...),
+    latitude: float = Body(None),
+    longitude: float = Body(None),
+    message: str = Body(None),
+):
+    """DEV-ONLY: Trigger an SOS for a user without 2FA. Enabled only when DEV_TEST=1."""
+    if os.environ.get("DEV_TEST") != "1":
+        raise HTTPException(status_code=403, detail="Dev test endpoint disabled")
+
+    try:
+        loc = None
+        if latitude is not None and longitude is not None:
+            loc = LocationData(latitude=latitude, longitude=longitude)
+        else:
+            loc = LocationData(latitude=0.0, longitude=0.0)
+
+        alert_data = SOSAlertCreate(
+            user_id=user_id,
+            trigger_type="dev_test",
+            location=loc,
+            message=message,
+        )
+
+        alert = await create_sos_alert(alert_data, None)
+        # Broadcast so admins receive it (uses broadcast_to_admins which now filters by area)
+        try:
+            from datetime import datetime
+            location_payload = {
+                "latitude": alert["location"].get("latitude"),
+                "longitude": alert["location"].get("longitude"),
+                "accuracy": alert["location"].get("accuracy"),
+                "address": alert["location"].get("address"),
+                "timestamp": alert["location"].get("timestamp"),
+            }
+            await broadcast_to_admins("new_sos_alert", {
+                "alert_id": alert["_id"],
+                "user_id": alert["user_id"],
+                "user_name": "(dev-test)",
+                "severity": alert["severity"],
+                "location": location_payload,
+            })
+        except Exception:
+            logger.exception("Failed broadcasting dev test alert")
+
+        return {"success": True, "alert": alert}
+    except Exception as e:
+        logger.error(f"DEV TEST SOS failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/trigger-voice")

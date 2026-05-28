@@ -44,9 +44,9 @@ export default function AnalyticsPage() {
         AI-powered safety trend analysis across all monitored zones
       </p>
 
-      <div style={s.row}>
+      <div className="analytics-grid-row">
         {/* Line chart */}
-        <div className="card" style={{ flex:2 }}>
+        <div className="glass-card" style={{ flex: 2, padding: '24px' }}>
           <h3 style={s.cardTitle}>Danger Level Trend (7 Days)</h3>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={trends.length ? trends : Array.from({length:7},(_,i)=>({
@@ -67,8 +67,8 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Pie chart */}
-        <div className="card" style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center' }}>
-          <h3 style={{...s.cardTitle, marginBottom:16}}>Alert Severity Distribution</h3>
+        <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px' }}>
+          <h3 style={{ ...s.cardTitle, marginBottom: 16 }}>Alert Severity Distribution</h3>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie data={PIE_DATA} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={({name,percent}) => `${name} ${(percent*100).toFixed(0)}%`}
@@ -81,9 +81,9 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div style={{...s.row, marginTop:20}}>
+      <div className="analytics-grid-row" style={{ marginTop: 20 }}>
         {/* Radar */}
-        <div className="card" style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center'}}>
+        <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px' }}>
           <h3 style={s.cardTitle}>System Activity Radar</h3>
           <ResponsiveContainer width="100%" height={220}>
             <RadarChart data={radarData}>
@@ -96,7 +96,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* KPI cards */}
-        <div className="card" style={{flex:1}}>
+        <div className="glass-card" style={{ flex: 1, padding: '24px' }}>
           <h3 style={s.cardTitle}>Key Performance Indicators</h3>
           <div style={{display:'flex', flexDirection:'column', gap:16, marginTop:12}}>
             {[

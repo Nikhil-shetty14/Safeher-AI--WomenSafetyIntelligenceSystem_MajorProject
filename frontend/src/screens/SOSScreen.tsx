@@ -220,11 +220,8 @@ export default function SOSScreen({ navigation, route }: any) {
       const filename = uri.split('/').pop() || 'sos_audio.m4a';
       const type = 'audio/m4a';
       
-      const decodedUri = decodeURIComponent(uri);
-      const fileUri = Platform.OS === 'android' ? (decodedUri.startsWith('file://') ? decodedUri : `file://${decodedUri}`) : decodedUri;
-      console.log('UPLOAD_DEBUG | Final File URI:', fileUri);
-
-      formData.append('audio', { uri: fileUri, name: filename, type } as any);
+      console.log('UPLOAD_DEBUG | Appending file with URI:', uri);
+      formData.append('audio', { uri, name: filename, type } as any);
       formData.append('user_id', user?.id || '');
       formData.append('latitude', location?.latitude?.toString() || '0');
       formData.append('longitude', location?.longitude?.toString() || '0');
@@ -252,7 +249,7 @@ export default function SOSScreen({ navigation, route }: any) {
     try {
       // Backend Alert - This triggers the Twilio calls and SMS automatically
       await sosAPI.trigger({
-        user_id: user?.id,
+        user_id: user?.id || 'unknown',
         trigger_type: trigger,
         location: location ? { latitude: location.latitude, longitude: location.longitude } : { latitude: 0, longitude: 0 },
         message: message || (isHiddenMode ? 'SILENT SOS TRIGGERED' : 'Emergency SOS Alert'),
@@ -272,16 +269,26 @@ export default function SOSScreen({ navigation, route }: any) {
         stopAndUploadRecording();
       }, 5000);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("SOS Trigger failed", err);
-      if (primaryContact?.phone && !isHiddenMode) {
-        Alert.alert(
-          'Connection Error', 
-          'Backend SOS failed. Triggering local emergency call instead.',
-          [{ text: 'Call Now', onPress: () => Linking.openURL(`tel:${primaryContact.phone}`) }]
-        );
+      if (!isHiddenMode) {
+        if (primaryContact?.phone) {
+          Alert.alert(
+            'Connection Error', 
+            'Backend SOS failed. Triggering local emergency call instead.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Call Now', onPress: () => Linking.openURL(`tel:${primaryContact.phone}`) }
+            ]
+          );
+        } else {
+          Alert.alert(
+            'SOS Failed', 
+            'Could not reach the server to trigger SOS. Please check your internet connection or backend server URL.'
+          );
+        }
       }
-      setPhase('sent');
+      setPhase('idle');
     }
   };
 
@@ -297,9 +304,8 @@ export default function SOSScreen({ navigation, route }: any) {
 
         setPhase('sending');
         const formData = new FormData();
-        const decodedUri = decodeURIComponent(uri);
-        const fileUri = Platform.OS === 'android' ? (decodedUri.startsWith('file://') ? decodedUri : `file://${decodedUri}`) : decodedUri;
-        formData.append('audio', { uri: fileUri, name: 'voice_sos.wav', type: 'audio/wav' } as any);
+        const filename = uri.split('/').pop() || 'voice_sos.wav';
+        formData.append('audio', { uri, name: filename, type: 'audio/wav' } as any);
         const res = await aiAPI.analyzeVoice(formData);
         const data = res.data;
         setAnalyzeResult(data);

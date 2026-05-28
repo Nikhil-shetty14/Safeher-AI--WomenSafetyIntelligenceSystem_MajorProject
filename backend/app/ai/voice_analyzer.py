@@ -6,32 +6,52 @@ from app.models.ai_prediction import DangerLevel
 from typing import Optional, Dict, Any
 from pydub import AudioSegment
 
-# 🛡️ Robust Dependency Handling
-try:
-    import torch
-    import whisper
-    AI_AVAILABLE = True
-    logger.info("AI Dependencies (Torch/Whisper) loaded successfully.")
-except ImportError:
-    AI_AVAILABLE = False
-    logger.error("CRITICAL: PyTorch or Whisper not installed. Voice analysis will be disabled.")
+# 🛡️ Fully lazy dependency loading to avoid WinError 1455 memory crashes
+# torch, whisper, and librosa are imported inside functions on first use.
 
-try:
-    import librosa
-    LIBROSA_AVAILABLE = True
-except ImportError:
-    LIBROSA_AVAILABLE = False
-    logger.warning("Librosa not installed. Advanced acoustic analysis disabled.")
-
-# Load whisper model globally (lazy load)
+_ai_available = None  # None = not yet checked
+_librosa_available = None
 _whisper_model = None
+
+
+def _check_ai():
+    """Lazily check if torch + whisper are importable."""
+    global _ai_available
+    if _ai_available is not None:
+        return _ai_available
+    try:
+        import torch  # noqa: F401
+        import whisper  # noqa: F401
+        _ai_available = True
+        logger.info("AI Dependencies (Torch/Whisper) loaded successfully.")
+    except (ImportError, OSError) as e:
+        _ai_available = False
+        logger.error(f"PyTorch/Whisper unavailable – voice analysis disabled: {e}")
+    return _ai_available
+
+
+def _check_librosa():
+    """Lazily check if librosa is importable."""
+    global _librosa_available
+    if _librosa_available is not None:
+        return _librosa_available
+    try:
+        import librosa  # noqa: F401
+        _librosa_available = True
+    except (ImportError, OSError) as e:
+        _librosa_available = False
+        logger.warning(f"Librosa not available – advanced acoustic analysis disabled: {e}")
+    return _librosa_available
+
 
 def get_whisper_model():
     global _whisper_model
-    if not AI_AVAILABLE:
+    if not _check_ai():
         return None
     if _whisper_model is None:
         try:
+            import torch
+            import whisper
             device = "cuda" if torch.cuda.is_available() else "cpu"
             # Using 'base' model for speed/accuracy balance
             _whisper_model = whisper.load_model("base", device=device)
@@ -41,17 +61,9 @@ def get_whisper_model():
     return _whisper_model
 
 
-try:
-    import librosa
-    LIBROSA_AVAILABLE = True
-except ImportError:
-    LIBROSA_AVAILABLE = False
-    logger.warning("Librosa not installed. Advanced acoustic analysis disabled.")
-
-
 async def transcribe_audio(audio_file_path: str) -> Optional[str]:
     """Transcribe audio using OpenAI Whisper."""
-    if not AI_AVAILABLE:
+    if not _check_ai():
         return "Audio transcription service disabled (missing dependencies)."
     
     model = get_whisper_model()
@@ -84,10 +96,11 @@ async def analyze_voice_stress(audio_file_path: str) -> Dict[str, Any]:
     """
     Perform deep acoustic analysis to detect panic, stress, and environmental danger.
     """
-    if not LIBROSA_AVAILABLE:
+    if not _check_librosa():
         return _get_default_analysis()
 
     try:
+        import librosa
         # Load audio (downsample for analysis speed)
         y, sr = librosa.load(audio_file_path, sr=16000, duration=30)
         
