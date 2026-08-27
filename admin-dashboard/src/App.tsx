@@ -10,6 +10,12 @@ import MapPage from "./MapPage";
 import UsersPage from "./UsersPage";
 import AnalyticsPage from "./AnalyticsPage";
 import ConsoleSettingsPage from "./ConsoleSettingsPage";
+import ComplaintsPage from "./ComplaintsPage";
+import BroadcastPage from "./BroadcastPage";
+import AdminProfilePage from "./AdminProfilePage";
+import AdminManagementPage from "./AdminManagementPage";
+import StateCommandCenter from "./StateCommandCenter";
+import AIIntelligenceCenter from "./AIIntelligenceCenter";
 import "./index.css";
 
 const Layout = ({ children }: { children: React.ReactNode }) => (
@@ -70,6 +76,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/complaints"
+        element={
+          <ProtectedRoute>
+            <ComplaintsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/map"
         element={
           <ProtectedRoute>
@@ -98,6 +112,46 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ConsoleSettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/broadcasts"
+        element={
+          <ProtectedRoute>
+            <BroadcastPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <AdminProfilePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin-management"
+        element={
+          <ProtectedRoute>
+            <AdminManagementPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/state-command"
+        element={
+          <ProtectedRoute>
+            <StateCommandCenter />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-intelligence"
+        element={
+          <ProtectedRoute>
+            <AIIntelligenceCenter />
           </ProtectedRoute>
         }
       />

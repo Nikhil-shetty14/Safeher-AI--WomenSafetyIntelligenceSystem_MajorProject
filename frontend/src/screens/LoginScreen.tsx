@@ -65,13 +65,13 @@ export default function LoginScreen({ navigation }: any) {
               <Ionicons name="shield-checkmark" size={48} color={Colors.white} />
             </View>
             <Text style={styles.appName}>SafeHer AI</Text>
-            <Text style={styles.tagline}>Your personal safety guardian 🛡️</Text>
+            <Text style={styles.tagline}>AI-Powered Women's Safety, Emergency Response & Public Protection Platform</Text>
           </View>
 
           {/* Form */}
           <Animated.View style={[styles.formCard, { transform: [{ translateX: shakeAnim }] }]}>
             <Text style={styles.heading}>Welcome Back</Text>
-            <Text style={styles.subheading}>Stay safe, stay connected</Text>
+            <Text style={styles.subheading}>Empowering Women's Safety Through Artificial Intelligence, Real-Time Emergency Coordination, and Smart Public Service Integration.</Text>
 
             <View style={styles.inputGroup}>
               <Ionicons name="call-outline" size={20} color={Colors.textMuted} style={styles.inputIcon} />
@@ -100,6 +100,13 @@ export default function LoginScreen({ navigation }: any) {
                 <Ionicons name={showPass ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              style={styles.forgotPasswordLink}
+              onPress={() => navigation.navigate('ForgotPassword')}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
@@ -203,4 +210,6 @@ const styles = StyleSheet.create({
   registerLink: { alignItems: 'center', marginTop: Spacing.lg },
   registerText: { color: Colors.textSecondary, fontSize: Typography.fontSizeMD },
   registerHighlight: { color: Colors.primaryLight, fontWeight: Typography.fontWeightBold },
+  forgotPasswordLink: { alignSelf: 'flex-end', marginBottom: Spacing.sm, marginTop: -4 },
+  forgotPasswordText: { color: Colors.primaryLight, fontSize: Typography.fontSizeSM, fontWeight: Typography.fontWeightSemibold },
 });

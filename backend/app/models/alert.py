@@ -22,6 +22,8 @@ class LocationData(BaseModel):
     longitude: float
     accuracy: Optional[float] = None
     address: Optional[str] = None
+    district: Optional[str] = None
+    division: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 

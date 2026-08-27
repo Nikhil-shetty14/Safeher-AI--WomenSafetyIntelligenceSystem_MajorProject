@@ -8,7 +8,7 @@ from app.services.notification_service import send_push_notification
 from app.core.database import get_collection
 from loguru import logger
 import asyncio
-
+from app.utils.geo_mapping import map_location_to_district
 
 async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None) -> dict:
     collection = get_collection("alerts")
@@ -60,6 +60,9 @@ async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None)
         # treat obvious invalid 0,0 as missing
         if abs(lat_f) < 1e-6 and abs(lng_f) < 1e-6:
             need_fallback = True
+            
+    users_col = get_collection("users")
+    user = await users_col.find_one({"_id": alert_data.user_id}) if users_col is not None else None
 
     if need_fallback:
         try:
@@ -76,6 +79,18 @@ async def create_sos_alert(alert_data: SOSAlertCreate, ai_analysis: dict = None)
                     logger.info(f"Alert {alert_id}: used fallback location from history for user {alert_data.user_id}")
         except Exception as e:
             logger.warning(f"Could not lookup fallback location: {e}")
+
+    # Map the location to district and division
+    if user and user.get("district") and user.get("division"):
+        loc_obj["district"] = user.get("district")
+        loc_obj["division"] = user.get("division")
+    elif loc_obj.get("latitude") and loc_obj.get("longitude") and not need_fallback:
+        district, division = map_location_to_district(loc_obj["latitude"], loc_obj["longitude"])
+        loc_obj["district"] = district
+        loc_obj["division"] = division
+    else:
+        loc_obj["district"] = "Unknown District"
+        loc_obj["division"] = "Unknown Division"
 
     alert_doc = {
         "_id": alert_id,

@@ -3,7 +3,14 @@
   "compilerOptions": {
     "strict": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
-    "jsx": "react-native"
-  }
+    "moduleResolution": "bundler",
+    "jsx": "react-native",
+    "target": "esnext",
+    "allowJs": true,
+    "esModuleInterop": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
 }

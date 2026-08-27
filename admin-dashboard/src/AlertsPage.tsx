@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { adminAPI } from "./api";
+import { useSocket } from "./SocketContext";
 import {
   AlertTriangle,
   Clock,
@@ -11,6 +12,7 @@ import {
   X,
   Trash2,
 } from "lucide-react";
+import AlertIntelligencePanel from "./components/AlertIntelligencePanel";
 import "./AlertsPage.css";
 
 interface AlertLocation {
@@ -42,29 +44,62 @@ interface AlertItem {
 }
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const getInitial = () => {
+    try {
+      const cached = localStorage.getItem('page_cache_alerts');
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+    return [];
+  };
+
+  const [alerts, setAlerts] = useState<AlertItem[]>(getInitial());
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  const { socket } = useSocket();
 
   const load = useCallback(async () => {
     try {
       const res = await adminAPI.getRecentAlerts(50);
-      setAlerts(res.data || []);
+      const data = res.data || [];
+      setAlerts(data);
+      try { localStorage.setItem('page_cache_alerts', JSON.stringify(data)); } catch(e) {}
     } catch (error) {
       console.error("Failed to load alerts", error);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
-    const initialize = async () => {
-      await load();
-    };
-    initialize();
-    const t = setInterval(load, 10000);
+    load();
+    const t = setInterval(load, 30000); // 30s background sync
     return () => clearInterval(t);
   }, [load]);
+
+  useEffect(() => {
+    if (!socket) return;
+    
+    const handleNewAlert = (d: any) => {
+      setAlerts(prev => {
+        if (prev.find(a => a.id === d.alert_id)) return prev;
+        const newAlert = {
+          id: d.alert_id,
+          user_id: d.user_id,
+          user_name: d.user_name,
+          severity: d.severity,
+          location: d.location,
+          status: 'active',
+          created_at: d.location?.timestamp || new Date().toISOString()
+        };
+        const updated = [newAlert, ...prev];
+        try { localStorage.setItem('page_cache_alerts', JSON.stringify(updated)); } catch(e) {}
+        return updated;
+      });
+    };
+
+    socket.on('new_sos_alert', handleNewAlert);
+    return () => {
+      socket.off('new_sos_alert', handleNewAlert);
+    };
+  }, [socket]);
 
   const handleResolve = async (id: string) => {
     if (!window.confirm("Mark this emergency as RESOLVED?")) return;
@@ -119,12 +154,6 @@ export default function AlertsPage() {
     return [lat, lng];
   };
 
-  if (loading)
-    return (
-      <div className="alerts-page__loader">
-        SCANNING EMERGENCY FREQUENCIES...
-      </div>
-    );
 
   return (
     <motion.div
@@ -135,143 +164,11 @@ export default function AlertsPage() {
     >
       <AnimatePresence>
         {selectedAlert && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="alerts-page__detail-overlay"
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="glass-card alerts-page__detail-panel"
-            >
-              <button
-                onClick={() => setSelectedAlert(null)}
-                className="alerts-page__close-button"
-                aria-label="Close alert details"
-                title="Close"
-              >
-                <X size={20} />
-              </button>
-
-              <div className="alerts-page__section-header">
-                <div
-                  className={`alerts-page__status-indicator ${
-                    selectedAlert.status === "active"
-                      ? "alerts-page__status-active"
-                      : "alerts-page__status-resolved"
-                  }`}
-                />
-                <div>
-                  <h2 className="alerts-page__title">Intelligence Report</h2>
-                  <p className="alerts-page__meta">
-                    Reference ID: {selectedAlert.id}
-                  </p>
-                </div>
-              </div>
-
-              <div className="alerts-page__section-grid">
-                <div className="alerts-page__info-box">
-                  <p className="alerts-page__modal-label">Subject Personnel</p>
-                  <p className="alerts-page__modal-value">
-                    {selectedAlert.user_name || "N/A"}
-                  </p>
-                  <p className="alerts-page__modal-sub">
-                    {selectedAlert.user_phone || "No phone data"}
-                  </p>
-                </div>
-                <div className="alerts-page__info-box">
-                  <p className="alerts-page__modal-label">Incident Timestamp</p>
-                  <p className="alerts-page__modal-value">
-                    {new Date(
-                      selectedAlert.created_at +
-                        (selectedAlert.created_at.endsWith("Z") ? "" : "Z"),
-                    ).toLocaleString("en-IN", {
-                      timeZone: "Asia/Kolkata",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    })}
-                  </p>
-                  <p className="alerts-page__modal-sub">
-                    {new Date(
-                      selectedAlert.created_at +
-                        (selectedAlert.created_at.endsWith("Z") ? "" : "Z"),
-                    ).toLocaleString("en-IN", {
-                      timeZone: "Asia/Kolkata",
-                      dateStyle: "medium",
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              <div className="alerts-page__ai-card">
-                <div className="alerts-page__ai-top">
-                  <p className="alerts-page__ai-label">
-                    AI Safety Engine Analysis
-                  </p>
-                  <span
-                    className={`alerts-page__risk-chip ${
-                      selectedAlert.ai_analysis?.danger_level === "high"
-                        ? "high"
-                        : "normal"
-                    }`}
-                  >
-                    RISK:{" "}
-                    {selectedAlert.ai_analysis?.danger_level?.toUpperCase() ||
-                      "UNKNOWN"}
-                  </span>
-                </div>
-                <p className="alerts-page__ai-text">
-                  {selectedAlert.ai_analysis?.reasoning ||
-                    selectedAlert.ai_analysis?.ai_tactical_summary ||
-                    "Analyzing incident patterns... No reasoning provided by AI engine."}
-                </p>
-                <div className="alerts-page__ai-footer">
-                  <p className="alerts-page__ai-footer-label">
-                    Recommended Response
-                  </p>
-                  <p className="alerts-page__ai-footer-text">
-                    {selectedAlert.ai_analysis?.suggested_action ||
-                      (selectedAlert.ai_analysis?.recommendations?.length
-                        ? selectedAlert.ai_analysis.recommendations.join(" • ")
-                        : "Deploy emergency units to coordinates immediately.")}
-                  </p>
-                </div>
-              </div>
-
-              <div className="alerts-page__action-row">
-                <button
-                  onClick={() => handleDelete(selectedAlert.id)}
-                  className="alerts-page__action-button danger"
-                >
-                  <Trash2 size={16} /> DELETE
-                </button>
-                <button
-                  onClick={() => setSelectedAlert(null)}
-                  className="alerts-page__action-button secondary"
-                >
-                  CLOSE
-                </button>
-                <button
-                  onClick={() => {
-                    const normalized = normalizeCoords(selectedAlert.location);
-                    if (!normalized) {
-                      alert("Location data appears invalid for this alert.");
-                      return;
-                    }
-                    const [lat, lng] = normalized;
-                    window.open(`https://www.google.com/maps?q=${lat},${lng}`);
-                  }}
-                  className="alerts-page__locate-button"
-                >
-                  LOCATE SOURCE
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <AlertIntelligencePanel 
+            alertId={selectedAlert.id} 
+            onClose={() => setSelectedAlert(null)} 
+            onResolve={handleResolve} 
+          />
         )}
       </AnimatePresence>
 

@@ -196,11 +196,37 @@ export default function HomeScreen({ navigation }: any) {
                   <Text style={styles.offlineText}>Offline Mode</Text>
                 </View>
               )}
+              <TouchableOpacity style={styles.bellBtn} onPress={() => navigation.navigate('NotificationHistory')}>
+                <Ionicons name="notifications" size={26} color={Colors.textPrimary} />
+                <View style={styles.bellBadge} />
+              </TouchableOpacity>
               <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('Profile')}>
                 <Ionicons name="person-circle" size={42} color={Colors.primaryLight} />
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* AI Intelligence Center Banner */}
+          <TouchableOpacity 
+            style={styles.aiBanner}
+            onPress={() => navigation.navigate('AIIntelligence')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.aiBannerLeft}>
+              <View style={styles.aiIconWrapper}>
+                <Ionicons name="sparkles" size={22} color={Colors.primaryLight} />
+              </View>
+              <View>
+                <Text style={styles.aiBannerTitle}>AI Intelligence Center</Text>
+                <Text style={styles.aiBannerSub}>Powered by Ollama Local LLM</Text>
+              </View>
+            </View>
+            <View style={styles.aiBadge}>
+              <View style={styles.aiBadgeDot} />
+              <Text style={styles.aiBadgeText}>AI LIVE</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={Colors.primaryLight} style={{marginLeft: 10}} />
+          </TouchableOpacity>
 
           {/* AI Safety Status Indicator & GPS Card Combined */}
           <View style={styles.statusGrid}>
@@ -270,6 +296,7 @@ export default function HomeScreen({ navigation }: any) {
               { id: 'timer', icon: 'timer', title: 'Safe Timer', sub: 'Auto Check-in', color: '#06B6D4', screen: 'SafeTimer' },
               { id: 'map', icon: 'map', title: 'Safe Route Map', sub: 'Live Tracking', color: Colors.primary, screen: 'Map' },
               { id: 'audio', icon: 'recording', title: 'Audio Evidence', sub: 'Start Record', color: Colors.warning, screen: 'SOS' },
+              { id: 'complaint', icon: 'document-text', title: 'File Complaint', sub: 'Report Incident', color: '#8b5cf6', screen: 'SubmitComplaint' },
             ].map((item) => (
               <TouchableOpacity key={item.id} style={styles.gridItem} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); navigation.navigate(item.screen); }}>
                 <Ionicons name={item.icon as any} size={28} color={item.color} />
@@ -334,9 +361,26 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   offlineBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.danger, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, gap: 4 },
   offlineText: { color: Colors.white, fontSize: 10, fontWeight: 'bold' },
+  bellBtn: { position: 'relative', marginRight: 8, padding: 4 },
+  bellBadge: { position: 'absolute', top: 4, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.danger },
   profileBtn: {},
   
   statusGrid: { flexDirection: 'row', paddingHorizontal: Spacing.lg, gap: Spacing.md, marginTop: Spacing.md },
+  
+  aiBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: Colors.card, marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    padding: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.primaryLight + '40',
+    ...Shadows.card
+  },
+  aiBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  aiIconWrapper: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primaryLight + '20', alignItems: 'center', justifyContent: 'center' },
+  aiBannerTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  aiBannerSub: { fontSize: 11, color: Colors.textMuted, marginTop: 2, fontWeight: '600' },
+  aiBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.danger + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: Colors.danger + '40' },
+  aiBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.danger, marginRight: 6 },
+  aiBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.danger, letterSpacing: 0.5 },
+
   statusCard: { 
     flex: 1, backgroundColor: Colors.card, borderRadius: BorderRadius.xl, padding: Spacing.md, 
     borderWidth: 1, borderColor: Colors.cardBorder, ...Shadows.card, position: 'relative', overflow: 'hidden'

@@ -15,6 +15,8 @@ interface User {
   blood_group?: string;
   medical_conditions?: string;
   allergies?: string;
+  division?: string;
+  district?: string;
   safety_preferences?: any;
   notification_settings?: any;
   security_settings?: any;

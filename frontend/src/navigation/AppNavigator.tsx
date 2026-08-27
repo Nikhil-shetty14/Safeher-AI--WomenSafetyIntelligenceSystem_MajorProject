@@ -13,6 +13,7 @@ import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import OTPVerifyScreen from '../screens/OTPVerifyScreen';
 import HomeScreen from '../screens/HomeScreen';
+import CompleteProfileScreen from '../screens/CompleteProfileScreen';
 import SOSScreen from '../screens/SOSScreen';
 import MapScreen from '../screens/MapScreen';
 import ContactsScreen from '../screens/ContactsScreen';
@@ -21,6 +22,14 @@ import ProfileScreen from '../screens/ProfileScreen';
 import AlertHistoryScreen from '../screens/AlertHistoryScreen';
 import FakeCallScreen from '../screens/FakeCallScreen';
 import SafeTimerScreen from '../screens/SafeTimerScreen';
+import SubmitComplaintScreen from '../screens/SubmitComplaintScreen';
+import MyComplaintsScreen from '../screens/MyComplaintsScreen';
+import NotificationScreen from '../screens/NotificationScreen';
+import BroadcastModal from '../components/BroadcastModal';
+import AIIntelligenceScreen from '../screens/AIIntelligenceScreen';
+
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -84,7 +93,9 @@ const TabNavigator = () => (
 );
 
 export default function AppNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  const isProfileComplete = user && user.district && user.district.trim() !== '' && user.district !== 'null' && user.division && user.division.trim() !== '' && user.division !== 'null';
 
   if (isLoading) {
     return (
@@ -98,21 +109,32 @@ export default function AppNavigator() {
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
-          <>
-            <Stack.Screen name="Main" component={TabNavigator} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="AlertHistory" component={AlertHistoryScreen} />
-            <Stack.Screen name="FakeCall" component={FakeCallScreen} options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
-            <Stack.Screen name="SafeTimer" component={SafeTimerScreen} />
-          </>
+          !isProfileComplete ? (
+            <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+          ) : (
+            <>
+              <Stack.Screen name="Main" component={TabNavigator} />
+              <Stack.Screen name="Profile" component={ProfileScreen} />
+              <Stack.Screen name="AlertHistory" component={AlertHistoryScreen} />
+              <Stack.Screen name="FakeCall" component={FakeCallScreen} options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
+              <Stack.Screen name="SafeTimer" component={SafeTimerScreen} />
+              <Stack.Screen name="SubmitComplaint" component={SubmitComplaintScreen} />
+              <Stack.Screen name="MyComplaints" component={MyComplaintsScreen} />
+              <Stack.Screen name="NotificationHistory" component={NotificationScreen} />
+              <Stack.Screen name="AIIntelligence" component={AIIntelligenceScreen} />
+            </>
+          )
         ) : (
           <>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Register" component={RegisterScreen} />
             <Stack.Screen name="OTPVerify" component={OTPVerifyScreen} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+            <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
           </>
         )}
       </Stack.Navigator>
+      {isAuthenticated && <BroadcastModal />}
     </NavigationContainer>
   );
 }

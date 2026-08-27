@@ -1,33 +1,34 @@
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
-import uuid
-from datetime import datetime
+import json
+from bson import json_util
+from app.core.database import connect_db, close_db, get_collection
+from app.services.alert_service import create_sos_alert
+from app.models.alert import SOSAlertCreate, LocationData
 
-async def insert_mock_alert():
-    client = AsyncIOMotorClient("mongodb+srv://safeher:safeher@cluster0.pqv0x.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
-    db = client["safeher"]
-    alerts = db["alerts"]
-    
-    alert_id = str(uuid.uuid4())
-    alert = {
-        "_id": alert_id,
-        "user_id": "mock_user",
-        "trigger_type": "manual",
-        "severity": "critical",
-        "status": "active",
-        "location": {
-            "latitude": 12.9716,
-            "longitude": 77.5946,
-            "accuracy": 10,
-            "timestamp": datetime.utcnow()
-        },
-        "message": "This is a mock SOS alert for testing",
-        "priority_score": 5,
-        "created_at": datetime.utcnow(),
-    }
-    
-    await alerts.insert_one(alert)
-    print(f"Inserted mock alert: {alert_id}")
+async def main():
+    await connect_db()
+    try:
+        users_col = get_collection("users")
+        user = await users_col.find_one({"name": {"$regex": "saara", "$options": "i"}})
+        if not user:
+            user = await users_col.find_one({})
+        
+        print(f"Using user: {user.get('name')} | District: {user.get('district')} | Division: {user.get('division')}")
+        
+        alert_data = SOSAlertCreate(
+            user_id=str(user["_id"]),
+            trigger_type="button",
+            location=LocationData(latitude=12.29, longitude=76.63)
+        )
+        
+        res = await create_sos_alert(alert_data)
+        print("Created alert successfully!")
+        print(json.dumps(res, indent=2, default=json_util.default))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+    finally:
+        await close_db()
 
 if __name__ == "__main__":
-    asyncio.run(insert_mock_alert())
+    asyncio.run(main())

@@ -7,7 +7,7 @@ import os
 from app.core.config import settings
 from app.core.database import connect_db, close_db
 from app.websockets.socket_manager import sio
-from app.api.routes import auth, sos, contacts, ai, location, admin, profile
+from app.api.routes import auth, sos, contacts, ai, location, admin, profile, complaints, broadcast, state_dashboard, reports
 from loguru import logger
 
 # Configure loguru
@@ -25,11 +25,35 @@ app = FastAPI(
 # CORS - Allow all in development to fix persistent connection issues
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from fastapi import Request
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"NETWORK_DEBUG | Incoming request: {request.method} {request.url} from IP: {client_ip}")
+    
+    # Safely log request bodies for POST/PUT without consuming the stream
+    if request.method in ["POST", "PUT", "PATCH"]:
+        try:
+            body = await request.body()
+            if body:
+                logger.info(f"NETWORK_DEBUG | Request body: {body.decode('utf-8')[:1000]}")
+        except Exception as e:
+            logger.error(f"NETWORK_DEBUG | Failed to read body: {e}")
+
+    try:
+        response = await call_next(request)
+        logger.info(f"NETWORK_DEBUG | Response status: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"NETWORK_DEBUG | Request failed: {str(e)}")
+        raise
 
 from fastapi.responses import JSONResponse
 
@@ -40,7 +64,7 @@ async def global_exception_handler(request, exc):
     traceback.print_exc()
     return JSONResponse(
         status_code=500,
-        content={"success": False, "error": "Internal server error"}
+        content={"success": False, "detail": "Internal server error. Please try again.", "error": "Internal server error"}
     )
 
 # Routers
@@ -51,9 +75,17 @@ app.include_router(ai.router)
 app.include_router(location.router)
 app.include_router(admin.router)
 app.include_router(profile.router)
+app.include_router(complaints.router)
+app.include_router(broadcast.router)
+app.include_router(state_dashboard.router)
+app.include_router(reports.router)
 
 # Static files (audio uploads)
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+
+# Walk With Me routes
+from app.api.routes.walk_routes import router as walk_router
+app.include_router(walk_router)
 os.makedirs("logs", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
@@ -73,6 +105,11 @@ async def startup():
         logger.error("OLLAMA_BASE_URL missing in .env! AI features will use local mock fallback.")
     else:
         logger.info("Ollama Local LLM configuration loaded successfully")
+
+    # Start the broadcast scheduler background task
+    import asyncio
+    from app.services.broadcast_service import poll_scheduled_broadcasts
+    asyncio.create_task(poll_scheduled_broadcasts())
 
     logger.info(f"SafeHer AI Backend started | Version {settings.APP_VERSION}")
 

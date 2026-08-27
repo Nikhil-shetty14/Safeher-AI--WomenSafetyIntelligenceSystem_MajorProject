@@ -554,6 +554,21 @@ export default function ProfileScreen({ navigation }: any) {
           />
         </Section>
 
+        {/* Complaints */}
+        <Section title="Complaints & Reports" icon="document-text-outline">
+          <SettingRow 
+            icon="add-circle-outline" 
+            label="File a Complaint" 
+            onPress={() => navigation.navigate('SubmitComplaint')} 
+          />
+          <SettingRow 
+            icon="list-outline" 
+            label="My Complaints" 
+            onPress={() => navigation.navigate('MyComplaints')} 
+            last
+          />
+        </Section>
+
         {/* Logout */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <LinearGradient 
@@ -565,7 +580,7 @@ export default function ProfileScreen({ navigation }: any) {
           </LinearGradient>
         </TouchableOpacity>
 
-        <Text style={styles.footerText}>SafeHer AI v1.0.0 • Production Ready</Text>
+        <Text style={styles.footerText}>SafeHer AI • A Statewide Intelligent Women's Safety and Emergency Response Ecosystem for Government, Law Enforcement, and Public Service Organizations.</Text>
         <View style={{ height: 100 }} />
       </Animated.ScrollView>
     </KeyboardAvoidingView>

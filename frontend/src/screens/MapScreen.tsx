@@ -55,7 +55,7 @@ export default function MapScreen() {
   // Dynamic Datasets (Real-world OpenStreetMap + Local Fallsafe Fallback)
   const [dangerZones, setDangerZones] = useState<any[]>([]);
   const [emergencyServices, setEmergencyServices] = useState<any[]>([]);
-  const [dataOrigin, setDataOrigin] = useState<'Real-world (OSM Live)' | 'Simulated Grid'>('Simulated Grid');
+  const [dataOrigin, setDataOrigin] = useState<'Real-world (OSM Live)' | 'Simulated Grid' | 'AI‑Enhanced (OSM + LLM)' | 'AI Error' | 'OSM Fetch Error'>('Simulated Grid');
 
   // Navigation & Safety Modes
   const [safeTripMode, setSafeTripMode] = useState(false);
@@ -112,20 +112,22 @@ export default function MapScreen() {
     };
   }, []);
 
-  const generateNearbyData = (lat: number, lng: number) => {
-    return {
-      dangerZones: [
-        { id: 'zone-1', name: 'Dark Alleyway (Low Lighting)', latitude: lat + 0.0035, longitude: lng + 0.0045, radius: 220, risk: 'high', score: 82 },
-        { id: 'zone-2', name: 'Isolated Transit Underpass', latitude: lat - 0.0045, longitude: lng - 0.0035, radius: 180, risk: 'critical', score: 94 },
-        { id: 'zone-3', name: 'Commercial Alleyway (Petty Crimes)', latitude: lat + 0.0025, longitude: lng - 0.0065, radius: 200, risk: 'medium', score: 64 }
-      ],
-      emergencyServices: [
-        { id: 'police-1', name: 'Local Safety Police Precinct', type: 'police', latitude: lat + 0.0022, longitude: lng - 0.0032, phone: '100', status: 'Operational' },
-        { id: 'police-2', name: 'SafeHer Pink Emergency Patrol Post', type: 'police', latitude: lat - 0.0012, longitude: lng + 0.0032, phone: '1091', status: 'Active Dispatch' },
-        { id: 'hospital-1', name: 'Safety Medical Center & ER', type: 'hospital', latitude: lat - 0.0032, longitude: lng + 0.0012, phone: '108', status: '24/7 ER Open' },
-        { id: 'center-1', name: 'SafeHer Help & Women Relief Hub', type: 'women_center', latitude: lat + 0.0042, longitude: lng + 0.0052, phone: '181', status: 'Volunteers Present' }
-      ]
-    };
+  // Removed generateNearbyData to enforce real AI data.
+
+  const fetchAIservices = async (lat: number, lng: number) => {
+    try {
+      const res = await aiAPI.getNearbyServices(lat, lng);
+      if (res && res.data && res.data.services) {
+        setEmergencyServices(res.data.services);
+        setDataOrigin('AI‑Enhanced (OSM + LLM)');
+      } else {
+        throw new Error('Invalid response from AI endpoint');
+      }
+    } catch (e) {
+      console.warn('AI fetch failed:', e);
+      setEmergencyServices([]);
+      setDataOrigin('AI Error');
+    }
   };
 
   const fetchRealWorldServices = async (lat: number, lng: number) => {
@@ -160,10 +162,9 @@ export default function MapScreen() {
         throw new Error("No real-world elements found in radius");
       }
     } catch (e) {
-      console.warn("Real-world fetch failed, engaging dynamic simulated fallback:", e);
-      const dynamicData = generateNearbyData(lat, lng);
-      setEmergencyServices(dynamicData.emergencyServices);
-      setDataOrigin('Simulated Grid');
+      console.warn("Real-world fetch failed:", e);
+      setEmergencyServices([]);
+      setDataOrigin('OSM Fetch Error');
     }
   };
 
@@ -179,24 +180,10 @@ export default function MapScreen() {
       const coords = loc.coords;
       setLocation(coords);
       
-      const dynamicData = generateNearbyData(coords.latitude, coords.longitude);
-      setDangerZones(dynamicData.dangerZones);
-
-      await fetchRealWorldServices(coords.latitude, coords.longitude);
-
-      mapRef.current?.animateToRegion({
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
-      }, 500);
-
-      analyzeAreaRisk(coords.latitude, coords.longitude);
     } catch (e) {
       console.warn("Location fetch failed, using default Bengaluru coords:", e);
-      const dynamicData = generateNearbyData(12.9716, 77.5946);
-      setDangerZones(dynamicData.dangerZones);
-      setEmergencyServices(dynamicData.emergencyServices);
+      setDangerZones([]);
+      setEmergencyServices([]);
     }
   };
 
@@ -204,25 +191,33 @@ export default function MapScreen() {
     try {
       const res = await aiAPI.getAreaRisk(lat, lng);
       if (res.data) {
-        setRiskLevel(res.data.risk_level || 'low');
-        setRiskScore(res.data.risk_level === 'high' ? 82 : res.data.risk_level === 'medium' ? 54 : 24);
-        setRiskRecommendation(res.data.recommendation || 'Safe route detected.');
-        if (res.data.factors) setRiskFactors(res.data.factors);
+        setRiskLevel(res.data.threat_level?.toLowerCase() || 'low');
+        setRiskScore(res.data.risk_score || 24);
+        setRiskRecommendation(res.data.hotspot_reason || 'Safe route detected.');
+        if (res.data.recommended_actions) setRiskFactors(res.data.recommended_actions);
+        
+        // Use AI prediction to dynamically set a single contextual danger zone 
+        // around the current location if risk is elevated
+        if (res.data.risk_score > 60) {
+            setDangerZones([{
+                id: 'ai-zone-1', 
+                name: res.data.threat_level + ' Threat Area', 
+                latitude: lat, 
+                longitude: lng, 
+                radius: 250, 
+                risk: res.data.threat_level?.toLowerCase(), 
+                score: res.data.risk_score
+            }]);
+        } else {
+            setDangerZones([]);
+        }
       }
     } catch {
-      const hour = new Date().getHours();
-      const isNight = timeOfDay === 'night' || hour < 6 || hour > 19;
-      if (isNight) {
-        setRiskLevel('medium');
-        setRiskScore(58);
-        setRiskFactors(['Nighttime travel active', 'Reduced street lighting in minor sectors']);
-        setRiskRecommendation('Bypass minor alleyways. Stay on primary arterial roads.');
-      } else {
-        setRiskLevel('low');
-        setRiskScore(21);
-        setRiskFactors(['Active daylight hours', 'Frequent police presence']);
-        setRiskRecommendation('Route is safe. Travel freely.');
-      }
+        setRiskLevel('unknown');
+        setRiskScore(0);
+        setRiskFactors(['Failed to connect to AI Intelligence']);
+        setRiskRecommendation('Unable to retrieve area risk. Proceed with caution.');
+        setDangerZones([]);
     }
   };
 
@@ -273,30 +268,45 @@ export default function MapScreen() {
     setLocationHistory([]);
   };
 
-  const handlePlanRoute = () => {
+  const handlePlanRoute = async () => {
     if (!destination) {
       Alert.alert('Route Planner', 'Please specify a destination.');
       return;
     }
     setSafeTripMode(true);
     
-    const baseLat = location.latitude;
-    const baseLng = location.longitude;
-    const safePath = [
-      { latitude: baseLat, longitude: baseLng },
-      { latitude: baseLat + 0.002, longitude: baseLng - 0.0015 },
-      { latitude: baseLat + 0.004, longitude: baseLng + 0.0025 },
-      { latitude: baseLat + 0.006, longitude: baseLng + 0.0045 },
-    ];
-    setRoutePolyline(safePath);
-    setRiskLevel('low');
-    setRiskScore(14);
-    setRiskFactors(['✨ 100% Well-Lit Pathways', '👮 Passing Pink Patrol Post', '👥 Active Pedestrian Corridors']);
-    setRiskRecommendation('Plan confirmed. Safest route selected. All contacts informed.');
-    Vibration.vibrate(150);
+    try {
+        // Here we ideally want to geocode the destination. For demonstration, we just add offsets to lat/lng.
+        const endLat = location.latitude + 0.006;
+        const endLng = location.longitude + 0.0045;
+        
+        const res = await fetch('http://10.126.101.100:8000/api/ai/predict-route-safety', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                start_latitude: location.latitude,
+                start_longitude: location.longitude,
+                end_latitude: endLat,
+                end_longitude: endLng
+            })
+        });
+        const data = await res.json();
+        
+        if (data && data.success) {
+            setRoutePolyline(data.safest_route);
+            setRiskLevel(data.risk_level?.toLowerCase() || 'low');
+            setRiskScore(data.safety_score || 14);
+            setRiskFactors(data.highlights || []);
+            setRiskRecommendation('AI evaluated route. ' + (data.highlights?.[0] || ''));
+            Vibration.vibrate(150);
+        }
+    } catch (e) {
+        Alert.alert('AI Route Planner Failed', 'Could not fetch route safety from AI engine.');
+        setSafeTripMode(false);
+    }
   };
 
-  const handleSimulateDeviation = (val: boolean) => {
+  const handleSimulateDeviation = async (val: boolean) => {
     setDeviationSimulated(val);
     if (val) {
       Vibration.vibrate([0, 400, 200, 400]);
@@ -305,11 +315,8 @@ export default function MapScreen() {
       const offCourseLng = location.longitude - 0.0035;
       setLocation({ ...location, latitude: offCourseLat, longitude: offCourseLng });
       
-      setRiskLevel('critical');
-      setRiskScore(89);
-      setRiskFactors(['🚨 Unexpected Route Deviation Detected', 'Isolated dark alley entered', 'No active pedestrian traffic']);
-      setRiskRecommendation('AI WARNING: Unusual stop or deviation. Returning to planned corridor advised. Emergency contacts notified.');
-      
+      // Request real risk check for the deviated location
+      await analyzeAreaRisk(offCourseLat, offCourseLng);
       sendLocation(offCourseLat, offCourseLng, 10);
     } else {
       initLocation();
@@ -416,6 +423,18 @@ export default function MapScreen() {
         longitudeDelta: 0.015,
       }, 600);
     }
+  };
+
+  const handleStartWalkWithMe = async () => {
+    // Initiate safe trip mode and start GPS tracking
+    setSafeTripMode(true);
+    setTracking(true);
+    // If a destination is set, plan a route; otherwise just start tracking
+    if (destination) {
+      handlePlanRoute();
+    }
+    // Start location watch
+    await startTracking();
   };
 
   const getRiskColor = (level: string) => {
@@ -526,6 +545,10 @@ export default function MapScreen() {
               {isConnected ? 'Telemetry Live' : 'Offline Backup'}
             </Text>
           </View>
+          <TouchableOpacity style={styles.walkBtn} onPress={handleStartWalkWithMe}>
+            <Ionicons name="walk" size={20} color="#fff" />
+            <Text style={styles.walkBtnText}>Walk With Me</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Filters and Controls */}
@@ -589,9 +612,17 @@ export default function MapScreen() {
         <View style={styles.riskHeader}>
           <View style={{ flex: 1 }}>
             <Text style={styles.riskLabel}>AI Area Intelligence Risk Score ({dataOrigin})</Text>
-            <Text style={[styles.riskTitle, { color: getRiskColor(riskLevel) }]}>
-              {riskScore}% {riskLevel.toUpperCase()}
-            </Text>
+            <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
+              <Text style={[styles.riskTitle, { color: getRiskColor(riskLevel) }]}>
+                {riskScore}% {riskLevel.toUpperCase()}
+              </Text>
+              {safeTripMode && (
+                <View style={{marginLeft: 12, backgroundColor: Colors.success + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center'}}>
+                  <Ionicons name="shield-checkmark" size={12} color={Colors.success} />
+                  <Text style={{fontSize: 9, fontWeight: '800', color: Colors.success, marginLeft: 4}}>AI VERIFIED ROUTE</Text>
+                </View>
+              )}
+            </View>
           </View>
           <View style={[styles.riskDotGauge, { backgroundColor: getRiskColor(riskLevel) }]} />
         </View>
@@ -677,28 +708,38 @@ export default function MapScreen() {
                 const targetLng = selectedService.longitude;
                 const targetName = selectedService.name;
                 
-                // 1. Draw Safest Route inside SafeHer Map Console
+                // 1. Ask Backend AI to evaluate and map route
                 setDestination(targetName);
-                setSafeTripMode(true);
                 
-                const baseLat = location.latitude;
-                const baseLng = location.longitude;
-                const safePath = [
-                  { latitude: baseLat, longitude: baseLng },
-                  { latitude: baseLat + (targetLat - baseLat) * 0.3, longitude: baseLng + (targetLng - baseLng) * 0.2 },
-                  { latitude: baseLat + (targetLat - baseLat) * 0.6, longitude: baseLng + (targetLng - baseLng) * 0.75 },
-                  { latitude: targetLat, longitude: targetLng }
-                ];
-                setRoutePolyline(safePath);
-                setSelectedService(null);
-                
-                // 2. Animate Camera to focus on the planned safe route path
-                mapRef.current?.animateToRegion({
-                  latitude: (baseLat + targetLat) / 2,
-                  longitude: (baseLng + targetLng) / 2,
-                  latitudeDelta: Math.abs(targetLat - baseLat) * 1.5 || 0.015,
-                  longitudeDelta: Math.abs(targetLng - baseLng) * 1.5 || 0.015,
-                }, 600);
+                try {
+                    const res = await fetch('http://10.126.101.100:8000/api/ai/predict-route-safety', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            start_latitude: location.latitude,
+                            start_longitude: location.longitude,
+                            end_latitude: targetLat,
+                            end_longitude: targetLng
+                        })
+                    });
+                    const data = await res.json();
+                    if (data && data.success) {
+                        setSafeTripMode(true);
+                        setRoutePolyline(data.safest_route);
+                        setSelectedService(null);
+                        
+                        // 2. Animate Camera to focus on the planned safe route path
+                        mapRef.current?.animateToRegion({
+                          latitude: (location.latitude + targetLat) / 2,
+                          longitude: (location.longitude + targetLng) / 2,
+                          latitudeDelta: Math.abs(targetLat - location.latitude) * 1.5 || 0.015,
+                          longitudeDelta: Math.abs(targetLng - location.longitude) * 1.5 || 0.015,
+                        }, 600);
+                    }
+                } catch(e) {
+                    Alert.alert('Error', 'Failed to fetch AI route.');
+                    return;
+                }
 
                 // 3. Open External Native Google/Apple Maps with one-tap
                 Alert.alert(
@@ -765,6 +806,20 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#06040c' },
   map: { flex: 1 },
+  walkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34d399', // Emerald
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  walkBtnText: {
+    color: '#fff',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
   sosOverlayBorder: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     borderWidth: 4, borderColor: '#ef4444',

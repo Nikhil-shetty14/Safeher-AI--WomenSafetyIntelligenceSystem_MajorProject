@@ -8,7 +8,8 @@ import uuid
 router = APIRouter(prefix="/api/contacts", tags=["Emergency Contacts"])
 
 
-@router.post("/", response_model=EmergencyContactResponse, status_code=201)
+@router.post("", response_model=EmergencyContactResponse, status_code=201)
+@router.post("/", response_model=EmergencyContactResponse, status_code=201, include_in_schema=False)
 async def add_contact(
     contact_data: EmergencyContactCreate,
     current_user: dict = Depends(get_current_user)
@@ -46,7 +47,7 @@ async def add_contact(
     return _format_contact(contact_doc)
 
 
-@router.get("/")
+@router.get("")
 async def get_contacts(current_user: dict = Depends(get_current_user)):
     """Get all emergency contacts for current user."""
     collection = get_collection("emergency_contacts")

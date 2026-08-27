@@ -1,21 +1,33 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { adminAPI } from './api';
 import { Shield, Mail, Phone, Calendar, Edit2, Check, X } from 'lucide-react';
+import { KARNATAKA_DIVISIONS, KARNATAKA_DISTRICTS } from './utils/constants';
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<any[]>([]);
+  const getInitial = () => {
+    try {
+      const cached = localStorage.getItem('page_cache_users');
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+    return [];
+  };
+
+  const [users, setUsers] = useState<any[]>(getInitial());
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all');
-  const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try { const r = await adminAPI.getUsers(); setUsers(r.data || []); }
-    catch { setUsers([]); }
-    setLoading(false);
+    try { 
+      const r = await adminAPI.getUsers(); 
+      const data = r.data || [];
+      setUsers(data); 
+      try { localStorage.setItem('page_cache_users', JSON.stringify(data)); } catch(e) {}
+    } catch { 
+      // Silently fail or keep cache
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -30,7 +42,7 @@ export default function UsersPage() {
 
   const startEdit = (u: any) => {
     setEditingId(u.id);
-    setEditForm({ name: u.name, phone: u.phone, role: u.role, is_active: u.is_active });
+    setEditForm({ name: u.name, phone: u.phone, role: u.role, is_active: u.is_active, division: u.division, district: u.district });
   };
 
   const cancelEdit = () => {
@@ -76,10 +88,7 @@ export default function UsersPage() {
         >Regular Users</button>
       </div>
 
-      {loading ? (
-        <p style={{ color:'#6b5a8a', padding:24 }}>Loading users...</p>
-      ) : (
-        <div style={s.grid}>
+      <div style={s.grid}>
           {filtered.map(u => {
             const isEditing = editingId === u.id;
             return (
@@ -97,17 +106,41 @@ export default function UsersPage() {
                     <p style={s.name}>{u.name}</p>
                   )}
                   {isEditing ? (
-                    <select 
-                      style={s.editSelect}
-                      value={editForm.role}
-                      onChange={e => setEditForm({...editForm, role: e.target.value})}
-                    >
-                      <option value="user">user</option>
-                      <option value="admin">admin</option>
-                    </select>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <select 
+                        style={s.editSelect}
+                        value={editForm.role}
+                        onChange={e => setEditForm({...editForm, role: e.target.value})}
+                      >
+                        <option value="user">User</option>
+                        <option value="super_admin">Super Admin</option>
+                        <option value="regional_admin">Regional Admin</option>
+                        <option value="district_admin">District Admin</option>
+                      </select>
+                      {editForm.role === 'regional_admin' && (
+                        <select style={s.editSelect} value={editForm.division || ''} onChange={e => setEditForm({...editForm, division: e.target.value, district: ''})}>
+                          <option value="">Select Division</option>
+                          {KARNATAKA_DIVISIONS.map(div => <option key={div} value={div}>{div}</option>)}
+                        </select>
+                      )}
+                      {editForm.role === 'district_admin' && (
+                        <>
+                          <select style={s.editSelect} value={editForm.division || ''} onChange={e => setEditForm({...editForm, division: e.target.value, district: ''})}>
+                            <option value="">Select Division</option>
+                            {KARNATAKA_DIVISIONS.map(div => <option key={div} value={div}>{div}</option>)}
+                          </select>
+                          <select style={s.editSelect} value={editForm.district || ''} onChange={e => setEditForm({...editForm, district: e.target.value})} disabled={!editForm.division}>
+                            <option value="">Select District</option>
+                            {(KARNATAKA_DISTRICTS[editForm.division] || []).map((dist: string) => (
+                              <option key={dist} value={dist}>{dist}</option>
+                            ))}
+                          </select>
+                        </>
+                      )}
+                    </div>
                   ) : (
-                    <span className={`badge ${u.role === 'admin' ? 'badge-critical' : 'badge-safe'}`}>
-                      {u.role === 'admin' && <Shield size={10} />} {u.role}
+                    <span className={`badge ${['admin', 'super_admin', 'regional_admin', 'district_admin'].includes(u.role) ? 'badge-critical' : 'badge-safe'}`}>
+                      {['admin', 'super_admin', 'regional_admin', 'district_admin'].includes(u.role) && <Shield size={10} />} {u.role} {u.division ? `(${u.division})` : u.district ? `(${u.district})` : ''}
                     </span>
                   )}
                 </div>
@@ -169,7 +202,6 @@ export default function UsersPage() {
             </p>
           )}
         </div>
-      )}
     </div>
   );
 }

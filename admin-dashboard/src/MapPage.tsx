@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, Circle, InfoWindow } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, Circle, InfoWindow, HeatmapLayer } from '@react-google-maps/api';
 import { adminAPI } from './api';
 import { useSocket } from './SocketContext';
 import { 
@@ -27,10 +27,13 @@ const tacticalStyle = [
   { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#06040d" }] }
 ];
 
+const libraries: any = ['visualization'];
+
 export default function MapPage() {
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "")
+    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ""),
+    libraries
   });
 
   const { socket } = useSocket();
@@ -38,6 +41,10 @@ export default function MapPage() {
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [map, setMap] = useState<any>(null);
+
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showUsers, setShowUsers] = useState(true);
+  const [mapType, setMapType] = useState<'tactical' | 'satellite'>('tactical');
 
   const fetchLiveState = useCallback(async () => {
     try {
@@ -78,6 +85,36 @@ export default function MapPage() {
 
   const onMapLoad = useCallback((map: any) => setMap(map), []);
 
+  const handleGlobalView = () => {
+    if (!map || !window.google) return;
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+    
+    Object.values(liveUsers).forEach((u: any) => {
+      if (u.latitude && u.longitude) {
+        bounds.extend(new window.google.maps.LatLng(u.latitude, u.longitude));
+        hasPoints = true;
+      }
+    });
+    activeAlerts.forEach((a: any) => {
+      if (a.location?.latitude && a.location?.longitude) {
+        bounds.extend(new window.google.maps.LatLng(a.location.latitude, a.location.longitude));
+        hasPoints = true;
+      }
+    });
+    
+    if (hasPoints) {
+      map.fitBounds(bounds);
+    } else {
+      map.setZoom(6);
+      map.panTo(center);
+    }
+  };
+
+  const toggleHeatmap = () => setShowHeatmap(!showHeatmap);
+  const toggleUsers = () => setShowUsers(!showUsers);
+  const toggleSettings = () => setMapType(mapType === 'tactical' ? 'satellite' : 'tactical');
+
   if (!isLoaded) return <div style={{ color: '#8b5cf6', padding: 20 }}>Loading Tactical Grid...</div>;
 
   return (
@@ -85,11 +122,11 @@ export default function MapPage() {
       {/* Map Control Overlay */}
       <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="glass-card" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <button className="map-tool-btn" title="Global View"><MapIcon size={20} /></button>
-          <button className="map-tool-btn" title="Live Heatmap"><Layers size={20} /></button>
-          <button className="map-tool-btn" title="User Tracking"><Users size={20} /></button>
+          <button className="map-tool-btn" title="Global View" onClick={handleGlobalView}><MapIcon size={20} /></button>
+          <button className="map-tool-btn" title="Live Heatmap" onClick={toggleHeatmap} style={{ color: showHeatmap ? '#ef4444' : '' }}><Layers size={20} /></button>
+          <button className="map-tool-btn" title="User Tracking" onClick={toggleUsers} style={{ color: showUsers ? '#06b6d4' : '' }}><Users size={20} /></button>
           <div style={{ height: '1px', background: 'var(--border)' }} />
-          <button className="map-tool-btn" title="Settings"><Settings size={20} /></button>
+          <button className="map-tool-btn" title="Toggle Satellite View" onClick={toggleSettings} style={{ color: mapType === 'satellite' ? '#10b981' : '' }}><Settings size={20} /></button>
         </div>
       </div>
 
@@ -152,14 +189,23 @@ export default function MapPage() {
         zoom={14}
         onLoad={onMapLoad}
         options={{
-          styles: tacticalStyle,
+          styles: mapType === 'tactical' ? tacticalStyle : undefined,
+          mapTypeId: mapType === 'satellite' ? 'hybrid' : 'roadmap',
           disableDefaultUI: true,
           zoomControl: false,
           mapTypeControl: false,
         }}
       >
+        {/* Heatmap Layer */}
+        {showHeatmap && window.google && (
+          <HeatmapLayer
+            data={activeAlerts.map((a: any) => new window.google.maps.LatLng(a.location.latitude, a.location.longitude))}
+            options={{ radius: 40, opacity: 0.8, gradient: ['rgba(0, 255, 255, 0)', 'rgba(0, 255, 255, 1)', 'rgba(0, 191, 255, 1)', 'rgba(0, 127, 255, 1)', 'rgba(0, 63, 255, 1)', 'rgba(0, 0, 255, 1)', 'rgba(0, 0, 223, 1)', 'rgba(0, 0, 191, 1)', 'rgba(0, 0, 159, 1)', 'rgba(0, 0, 127, 1)', 'rgba(63, 0, 91, 1)', 'rgba(127, 0, 63, 1)', 'rgba(191, 0, 31, 1)', 'rgba(255, 0, 0, 1)'] }}
+          />
+        )}
+
         {/* User Markers */}
-        {Object.values(liveUsers).map((user: any) => (
+        {showUsers && Object.values(liveUsers).map((user: any) => (
           <React.Fragment key={user.user_id}>
             <Marker
               position={{ lat: user.latitude, lng: user.longitude }}

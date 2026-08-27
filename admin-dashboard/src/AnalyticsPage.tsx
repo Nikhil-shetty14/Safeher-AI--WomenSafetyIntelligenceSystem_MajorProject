@@ -15,6 +15,25 @@ const PIE_DATA = [
 export default function AnalyticsPage() {
   const [trends, setTrends] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerateReport = async () => {
+    try {
+      setGenerating(true);
+      const res = await adminAPI.generateSystemReport();
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `SafeHer_Intelligence_Report_${new Date().getTime()}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert('Failed to generate report. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   useEffect(() => {
     adminAPI.getDangerTrends().then(r => {
@@ -39,10 +58,34 @@ export default function AnalyticsPage() {
 
   return (
     <div style={s.page}>
-      <h1 style={s.title}>📊 Analytics & Insights</h1>
-      <p style={{ color:'#6b5a8a', marginBottom:28, fontSize:13 }}>
-        AI-powered safety trend analysis across all monitored zones
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={s.title}>📊 Analytics & Insights</h1>
+          <p style={{ color:'#6b5a8a', marginBottom:28, fontSize:13 }}>
+            AI-powered safety trend analysis across all monitored zones
+          </p>
+        </div>
+        <button 
+          onClick={handleGenerateReport} 
+          disabled={generating}
+          style={{
+            background: generating ? '#4b5563' : 'linear-gradient(135deg, #8b5cf6, #ec4899)',
+            color: 'white',
+            border: 'none',
+            padding: '10px 20px',
+            borderRadius: '8px',
+            fontWeight: 700,
+            cursor: generating ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: '0 4px 15px rgba(236, 72, 153, 0.3)',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          {generating ? '⏳ Generating...' : '📄 Generate Official Report'}
+        </button>
+      </div>
 
       <div className="analytics-grid-row">
         {/* Line chart */}

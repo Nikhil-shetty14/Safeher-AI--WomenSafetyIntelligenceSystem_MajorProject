@@ -9,8 +9,7 @@ import { Platform } from "react-native";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext";
 
-const DEFAULT_SOCKET_HOST =
-  Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://127.0.0.1:8000";
+const DEFAULT_SOCKET_HOST = "http://10.165.16.100:8000";
 
 const SOCKET_URL =
   process.env.EXPO_PUBLIC_SOCKET_URL ||
@@ -25,6 +24,8 @@ interface SocketContextType {
   sendLocation: (lat: number, lng: number, accuracy?: number) => void;
   emitSOS: (location: any, severity?: string) => void;
   dangerAlerts: any[];
+  broadcasts: any[];
+  clearBroadcast: (id: string) => void;
 }
 
 const SocketContext = createContext<SocketContextType | null>(null);
@@ -36,17 +37,19 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [dangerAlerts, setDangerAlerts] = useState<any[]>([]);
+  const [broadcasts, setBroadcasts] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated || !user) return;
 
     const socket = io(SOCKET_URL, {
       path: "/socket.io",
-      transports: ["websocket"],
+      transports: ["polling", "websocket"],
       forceNew: true,
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
+      timeout: 20000,
     });
 
     socket.on("connect", () => {
@@ -62,6 +65,14 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
     socket.on("danger_alert", (alert) => {
       setDangerAlerts((prev) => [alert, ...prev]);
+    });
+
+    socket.on("emergency_broadcast", (broadcast) => {
+      setBroadcasts((prev) => {
+        // Prevent duplicates
+        if (prev.find(b => b._id === broadcast._id)) return prev;
+        return [broadcast, ...prev];
+      });
     });
 
     socketRef.current = socket;
@@ -90,6 +101,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   };
 
+  const clearBroadcast = (id: string) => {
+    setBroadcasts(prev => prev.filter(b => b._id !== id));
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -98,6 +113,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
         sendLocation,
         emitSOS,
         dangerAlerts,
+        broadcasts,
+        clearBroadcast,
       }}
     >
       {children}

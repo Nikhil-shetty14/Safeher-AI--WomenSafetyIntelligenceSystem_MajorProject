@@ -8,17 +8,18 @@ client: AsyncIOMotorClient = None
 async def connect_db():
     global client
     try:
-        client = AsyncIOMotorClient(
-            settings.MONGODB_URL,
-            serverSelectionTimeoutMS=10000,
-            connectTimeoutMS=10000,
-            tlsAllowInvalidCertificates=True,
-        )
+        if client is None:
+            client = AsyncIOMotorClient(
+                settings.MONGODB_URL,
+                serverSelectionTimeoutMS=10000,
+                connectTimeoutMS=10000,
+                tlsAllowInvalidCertificates=True,
+            )
         await client.admin.command("ping")
         logger.info("Connected to MongoDB Atlas successfully")
     except Exception as e:
-        logger.warning(f"MongoDB connection failed: {e}. Running with limited functionality.")
-        client = None
+        logger.error(f"MongoDB connection failed: {e}. Motor will automatically retry on the next request.")
+        # DO NOT set client = None. Let Motor retry.
 
 
 async def close_db():
@@ -29,13 +30,17 @@ async def close_db():
 
 
 def get_database():
+    global client
     if client is None:
-        return None
+        client = AsyncIOMotorClient(
+            settings.MONGODB_URL,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            tlsAllowInvalidCertificates=True,
+        )
     return client[settings.DATABASE_NAME]
 
 
 def get_collection(collection_name: str):
     db = get_database()
-    if db is None:
-        return None
     return db[collection_name]

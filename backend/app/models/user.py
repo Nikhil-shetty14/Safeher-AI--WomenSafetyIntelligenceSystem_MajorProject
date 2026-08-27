@@ -7,6 +7,9 @@ from enum import Enum
 class UserRole(str, Enum):
     user = "user"
     admin = "admin"
+    super_admin = "super_admin"
+    regional_admin = "regional_admin"
+    district_admin = "district_admin"
 
 
 class SafetyPreferences(BaseModel):
@@ -40,6 +43,16 @@ class UserCreate(BaseModel):
     address: Optional[str] = None
 
 
+class ForgotPasswordRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=15)
+
+
+class ResetPasswordRequest(BaseModel):
+    session_id: str
+    otp_code: str
+    new_password: str = Field(..., min_length=6)
+
+
 class UserLogin(BaseModel):
     phone: str
     password: str
@@ -59,6 +72,8 @@ class UserUpdate(BaseModel):
     safety_preferences: Optional[SafetyPreferences] = None
     notification_settings: Optional[NotificationSettings] = None
     security_settings: Optional[SecuritySettings] = None
+    division: Optional[str] = None
+    district: Optional[str] = None
 
 
 class AdminUserUpdate(BaseModel):
@@ -66,6 +81,19 @@ class AdminUserUpdate(BaseModel):
     phone: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    division: Optional[str] = None
+    district: Optional[str] = None
+
+
+class AdminCreate(BaseModel):
+    admin_id: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6)
+    name: str = Field(..., min_length=2, max_length=100)
+    phone: str = Field(..., min_length=10, max_length=15)
+    email: EmailStr
+    role: UserRole
+    division: Optional[str] = None
+    district: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -85,6 +113,10 @@ class UserResponse(BaseModel):
     safety_preferences: SafetyPreferences = SafetyPreferences()
     notification_settings: NotificationSettings = NotificationSettings()
     security_settings: SecuritySettings = SecuritySettings()
+    division: Optional[str] = None
+    district: Optional[str] = None
+    admin_id: Optional[str] = None
+    requires_password_change: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -114,5 +146,9 @@ class UserInDB(BaseModel):
     safety_preferences: SafetyPreferences = SafetyPreferences()
     notification_settings: NotificationSettings = NotificationSettings()
     security_settings: SecuritySettings = SecuritySettings()
+    division: Optional[str] = None
+    district: Optional[str] = None
+    admin_id: Optional[str] = None
+    requires_password_change: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

@@ -84,10 +84,10 @@ async def send_emergency_sms(user_id: str, to_phone: str, message: str, retries:
             error_msg = str(e)
             logger.error(f"SMS attempt {attempt+1} failed to {formatted_to}: {error_msg}")
             
-            # Handle unverified numbers in trial accounts
-            if "not verified" in error_msg.lower():
-                logger.warning(f"Twilio Trial Limit: Number {formatted_to} is not verified. Skipping retries.")
-                await log_twilio_event(user_id, "sms", formatted_to, "N/A", "failed_unverified", error_msg)
+            # Handle unverified numbers or unrecoverable client errors
+            if "not verified" in error_msg.lower() or "http 4" in error_msg.lower() or "short code" in error_msg.lower():
+                logger.warning(f"Unrecoverable Twilio Error: {error_msg}. Skipping retries.")
+                await log_twilio_event(user_id, "sms", formatted_to, "N/A", "failed_permanent", error_msg)
                 return False
                 
             if attempt < retries - 1:
@@ -132,9 +132,10 @@ async def make_emergency_call(user_id: str, to_phone: str, user_name: str, retri
             error_msg = str(e)
             logger.error(f"Call attempt {attempt+1} failed to {formatted_to}: {error_msg}")
             
-            if "not verified" in error_msg.lower():
-                logger.warning(f"Twilio Trial Limit: Number {formatted_to} is not verified.")
-                await log_twilio_event(user_id, "call", formatted_to, "N/A", "failed_unverified", error_msg)
+            # Handle unverified numbers or unrecoverable client errors
+            if "not verified" in error_msg.lower() or "http 4" in error_msg.lower() or "short code" in error_msg.lower():
+                logger.warning(f"Unrecoverable Twilio Error: {error_msg}. Skipping retries.")
+                await log_twilio_event(user_id, "call", formatted_to, "N/A", "failed_permanent", error_msg)
                 return False
 
             if attempt < retries - 1:

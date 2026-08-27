@@ -159,11 +159,17 @@ async def analyze_text_for_danger(text: str, location: Optional[dict] = None) ->
         return result
 
     except httpx.RequestError as e:
-        logger.error(f"Ollama Connection Error: {e}. Using fallback analysis.")
-        return _mock_danger_analysis(text, fallback_reason="Ollama API Unreachable")
+        logger.error(f"Ollama Connection Error: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="AI service unreachable")
+    except json.JSONDecodeError as e:
+        logger.error(f"Ollama returned invalid JSON: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="AI returned invalid response format")
     except Exception as e:
         logger.error(f"Ollama analysis failed: {e}")
-        return _mock_danger_analysis(text, fallback_reason="Ollama Error")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="AI analysis failed")
 
 
 async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, location: dict = None) -> dict:
@@ -204,43 +210,8 @@ async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, locat
         return json.loads(content)
     except Exception as e:
         logger.error(f"Audio Intelligence analysis failed: {e}")
-        return _mock_audio_intelligence(transcript, acoustic_data)
-
-
-def _mock_audio_intelligence(transcript: str, acoustic_data: dict) -> dict:
-    """Mock audio intelligence assessment for fallback when LLM fails."""
-    transcript_lower = (transcript or "").lower()
-    
-    # Base risk level from acoustic stress score if available
-    acoustic_stress = acoustic_data.get("stress_score", 0.5)
-    acoustic_danger = acoustic_data.get("danger_level", "medium").upper()
-    acoustic_emotion = acoustic_data.get("emotion", "anxious")
-    
-    risk_score = int(acoustic_stress * 100)
-    danger_level = acoustic_danger
-    
-    # Heuristics based on transcript keywords
-    critical_kw = ["help me", "attacking", "rape", "kidnap", "gun", "knife", "kill"]
-    high_kw = ["following me", "scared", "someone is behind", "don't feel safe", "threatening"]
-    
-    if any(kw in transcript_lower for kw in critical_kw):
-        danger_level = "CRITICAL"
-        risk_score = max(risk_score, 95)
-    elif any(kw in transcript_lower for kw in high_kw):
-        danger_level = "HIGH"
-        risk_score = max(risk_score, 85)
-        
-    return {
-        "danger_level": danger_level,
-        "risk_score": risk_score,
-        "detected_emotions": [acoustic_emotion],
-        "detected_threats": ["voice_stress_detected"] if risk_score > 70 else [],
-        "ai_tactical_summary": f"Fallback Assessment: Speech transcript: '{transcript}'. Acoustic emotion detected: {acoustic_emotion}.",
-        "recommendations": ["Initiate visual dispatch", "Attempt immediate contact verification", "Coordinate with local safety responders"],
-        "confidence_score": 0.7,
-        "trigger_emergency_protocol": risk_score > 75,
-        "fallback_active": True
-    }
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="AI Audio Intelligence failed")
 
 
 async def chat_with_safeher(message: str, history: list = None) -> dict:
@@ -271,7 +242,8 @@ async def chat_with_safeher(message: str, history: list = None) -> dict:
 
     except Exception as e:
         logger.error(f"Chat AI failed: {e}")
-        return _mock_chat_response(message)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="AI Chat service unavailable")
 
 
 async def predict_area_risk(latitude: float, longitude: float, time_of_day: str = None) -> dict:
@@ -283,8 +255,14 @@ async def predict_area_risk(latitude: float, longitude: float, time_of_day: str 
         - Time: {time_of_day or 'Unknown'}
         
         Based on general urban safety patterns, provide a risk assessment.
-        Return JSON: {{"risk_level": "low/medium/high", "confidence": 0.0-1.0, 
-        "factors": ["list"], "recommendation": "advice"}}
+        Return ONLY a JSON object exactly matching this schema:
+        {{
+            "risk_score": 0-100,
+            "threat_level": "LOW", "MEDIUM", "HIGH", or "CRITICAL",
+            "confidence": 0.0-1.0,
+            "hotspot_reason": "brief explanation",
+            "recommended_actions": ["action 1", "action 2"]
+        }}
         """
 
         content = await _call_ollama(
@@ -294,102 +272,54 @@ async def predict_area_risk(latitude: float, longitude: float, time_of_day: str 
             ],
             format_json=True,
             temperature=0.3,
-            max_tokens=200
+            max_tokens=250
         )
 
         return json.loads(content)
 
+    except httpx.RequestError as e:
+        logger.error(f"Ollama Connection Error in predict_area_risk: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="AI service unreachable")
     except Exception as e:
-        logger.error(f"Area risk prediction failed: {e}")
-        return {"risk_level": "unknown", "confidence": 0.0, "factors": [], "recommendation": "Stay alert"}
+        logger.exception(f"Area risk prediction failed: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Area risk prediction failed")
 
 
-def _mock_danger_analysis(text: str, fallback_reason: str = None) -> dict:
-    """Mock analysis when LLM is not configured or fails."""
-    text_lower = text.lower()
-    
-    # Base response
-    res = {
-        "danger_level": "LOW",
-        "risk_score": 10,
-        "trigger_emergency": False,
-        "recommended_action": "Stay aware of your surroundings.",
-        "detected_threats": [],
-        "summary": "No significant danger signals detected.",
-        "emotion": "neutral",
-        "fallback_active": True if fallback_reason else False,
-        "fallback_reason": fallback_reason
-    }
+async def generate_dashboard_intel(stats_summary: str) -> dict:
+    """Generate tactical recommendations and insights for the admin dashboard based on live stats."""
+    try:
+        prompt = f"""
+        You are a Tactical Command AI for a women's safety platform.
+        Here is the current live system summary:
+        {stats_summary}
 
-    # Keyword-based danger detection
-    critical_kw = ["help me", "attacking", "rape", "kidnap", "gun", "knife", "kill"]
-    high_kw = ["following me", "scared", "someone is behind", "don't feel safe", "threatening"]
-    medium_kw = ["uncomfortable", "feeling unsafe", "strange man", "being watched"]
+        Based on these metrics, generate 3 tactical recommendations for dispatchers, and 3 recent insights.
+        Return ONLY valid JSON matching this schema:
+        {{
+            "ai_recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+            "recent_insights": ["insight 1", "insight 2", "insight 3"]
+        }}
+        """
 
-    if any(kw in text_lower for kw in critical_kw):
-        res.update({
-            "danger_level": "CRITICAL",
-            "risk_score": 95,
-            "trigger_emergency": True,
-            "recommended_action": "IMMEDIATELY call 100 (Police) or 1091 (Women Helpline). Move to a crowded place now!",
-            "detected_threats": ["critical_keywords_detected"],
-            "summary": "Critical danger keywords detected in the text.",
-            "emotion": "panic",
-        })
-    elif any(kw in text_lower for kw in high_kw):
-        res.update({
-            "danger_level": "HIGH",
-            "risk_score": 85,
-            "trigger_emergency": True,
-            "recommended_action": "Alert emergency contacts now. Move to a public, well-lit area. Call 100 if needed.",
-            "detected_threats": ["high_risk_keywords"],
-            "summary": "High-risk situation detected.",
-            "emotion": "fear",
-        })
-    elif any(kw in text_lower for kw in medium_kw):
-        res.update({
-            "danger_level": "MEDIUM",
-            "risk_score": 70,
-            "trigger_emergency": False,
-            "recommended_action": "Share your live location with a trusted contact. Stay in well-lit areas.",
-            "detected_threats": ["medium_risk_keywords"],
-            "summary": "Moderate concern detected.",
-            "emotion": "anxiety",
-        })
-    
-    return res
+        content = await _call_ollama(
+            messages=[
+                {"role": "system", "content": "You are a Tactical Emergency Intelligence Engine."},
+                {"role": "user", "content": prompt},
+            ],
+            format_json=True,
+            temperature=0.3,
+            max_tokens=300
+        )
 
+        return json.loads(content)
 
-def _mock_chat_response(message: str) -> dict:
-    """Mock chatbot response for development."""
-    msg_lower = message.lower()
-
-    if any(kw in msg_lower for kw in ["help", "scared", "danger", "follow", "unsafe"]):
-        return {
-            "reply": (
-                "I can sense you might be in distress. Please stay calm. 💙\n\n"
-                "**Immediate steps:**\n"
-                "1. Move to a crowded, well-lit place\n"
-                "2. Press the SOS button on your app\n"
-                "3. Call Women Helpline: **1091**\n"
-                "4. Share your live location with a trusted contact\n\n"
-                "I'm here with you. Are you safe right now?"
-            ),
-            "danger_detected": True,
-            "danger_level": "high",
-        }
-
-    safety_tips = [
-        "Always share your live location with trusted contacts when traveling alone at night. 🗺️",
-        "Trust your instincts — if something feels wrong, it probably is. Act immediately.",
-        "The SafeHer SOS button will instantly alert your emergency contacts with your location.",
-        "Keep Women's Helpline (1091) and Police (100) saved on speed dial.",
-        "Walk confidently and stay aware of your surroundings. Avoid isolated areas.",
-    ]
-
-    import random
-    return {
-        "reply": f"Hi! I'm SafeHer AI, your personal safety assistant. 🌟\n\n{random.choice(safety_tips)}\n\nHow can I help you stay safe today?",
-        "danger_detected": False,
-        "danger_level": "safe",
-    }
+    except httpx.RequestError as e:
+        logger.error(f"Ollama Connection Error in generate_dashboard_intel: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="AI service unreachable")
+    except Exception as e:
+        logger.exception(f"Dashboard intel generation failed: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Dashboard intel generation failed")

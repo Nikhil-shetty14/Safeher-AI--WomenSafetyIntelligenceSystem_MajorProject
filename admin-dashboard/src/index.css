@@ -234,3 +234,71 @@ select:focus {
     flex-direction: row;
   }
 }
+
+/* Print Styles for Executive Dashboard Export */
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Hide navigation, sidebar, and non-printable elements */
+  nav, aside, .sidebar, .print-hide, .action-btn {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .command-center {
+    display: block !important;
+    height: auto !important;
+    background: none !important;
+  }
+  
+  .command-center::before, .command-center::after {
+    display: none !important;
+  }
+
+  .dashboard-container {
+    padding: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  .glass-card {
+    background: #fff !important;
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    border-radius: 4px !important;
+    color: #000 !important;
+    margin-bottom: 20px !important;
+    break-inside: avoid;
+  }
+
+  h1, h2, h3, h4, p, span {
+    color: #000 !important;
+  }
+
+  .stat-card {
+    border: 1px solid #ccc !important;
+    background: #f9f9f9 !important;
+  }
+
+  .print-grid {
+    display: block !important;
+  }
+  
+  .print-grid > div {
+    margin-bottom: 20px;
+    width: 100%;
+  }
+
+  svg {
+    stroke: #000 !important;
+    fill: none;
+  }
+}

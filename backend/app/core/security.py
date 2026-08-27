@@ -73,9 +73,27 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 
 async def get_current_admin(current_user=Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "super_admin", "regional_admin", "district_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
     return current_user
+
+async def log_admin_action(admin_id: str, admin_email: str, action: str, target_id: Optional[str] = None, details: Optional[str] = None):
+    try:
+        collection = get_collection("admin_logs")
+        if collection is not None:
+            import uuid
+            log_doc = {
+                "_id": str(uuid.uuid4()),
+                "admin_id": admin_id,
+                "admin_email": admin_email,
+                "action": action,
+                "target_id": target_id,
+                "details": details,
+                "created_at": datetime.utcnow()
+            }
+            await collection.insert_one(log_doc)
+    except Exception as e:
+        logger.error(f"Failed to log admin action: {e}")

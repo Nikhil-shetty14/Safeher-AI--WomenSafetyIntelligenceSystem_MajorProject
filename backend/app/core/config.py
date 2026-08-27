@@ -29,8 +29,12 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIALS_PATH: str = "./firebase-credentials.json"
     FCM_SERVER_KEY: str = ""
 
-    # Google Maps
-    GOOGLE_MAPS_API_KEY: str = ""
+    # Walk With Me Settings
+    WALK_DEVIATION_DISTANCE_THRESHOLD_M: int = 30  # meters
+    WALK_CONSECUTIVE_DEVIATIONS: int = 3
+    WALK_CONFIRM_TIMEOUT_SEC: int = 30
+    WALK_RISK_ASSESSMENT_ENABLED: bool = False
+
 
     # Data.gov.in
     DATA_GOV_API_KEY: str = ""

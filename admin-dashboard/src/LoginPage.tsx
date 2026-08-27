@@ -1,18 +1,41 @@
 import React, { useState } from 'react';
 import { useAdminAuth } from './AuthContext';
+import axios from 'axios';
 
 export default function LoginPage() {
-  const { login } = useAdminAuth();
-  const [email, setEmail] = useState('');
+  const { login, completeLogin } = useAdminAuth();
+  const [identifier, setIdentifier] = useState('');
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingAuth, setPendingAuth] = useState<any>(null);
+  const [newPass, setNewPass] = useState('');
 
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(''); setLoading(true);
-    try { await login(email, pass); }
+    try { 
+      const res = await login(identifier, pass); 
+      if (res?.data?.user?.requires_password_change) {
+        setPendingAuth({ token: res.data.access_token, user: res.data.user });
+      }
+    }
     catch (e: any) { setErr(e?.response?.data?.detail || e?.message || 'Login failed'); }
+    finally { setLoading(false); }
+  };
+
+  const handleChangePass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(''); setLoading(true);
+    try {
+      const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      await axios.post(`${BASE}/api/admin/change-password`, 
+        { old_password: pass, new_password: newPass },
+        { headers: { Authorization: `Bearer ${pendingAuth.token}` } }
+      );
+      const updatedUser = { ...pendingAuth.user, requires_password_change: false };
+      completeLogin(pendingAuth.token, updatedUser);
+    } catch (e: any) { setErr(e?.response?.data?.detail || e?.message || 'Password change failed'); }
     finally { setLoading(false); }
   };
 
@@ -26,24 +49,41 @@ export default function LoginPage() {
           </svg>
         </div>
         <h1 style={styles.title}>SafeHer AI</h1>
-        <p style={styles.sub}>Admin Control Center</p>
-        <form onSubmit={handle} style={styles.form}>
-          <div style={styles.field}>
-            <label style={styles.label}>Email</label>
-            <input style={styles.input} type="email" value={email}
-              onChange={e => setEmail(e.target.value)} placeholder="admin@safeher.ai" required />
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Password</label>
-            <input style={styles.input} type="password" value={pass}
-              onChange={e => setPass(e.target.value)} placeholder="••••••••" required />
-          </div>
-          {err && <div style={styles.err}>⚠️ {err}</div>}
-          <button style={{...styles.btn, opacity: loading ? 0.6 : 1}} type="submit" disabled={loading}>
-            {loading ? 'Signing in...' : '🔐 Sign In to Dashboard'}
-          </button>
-        </form>
-        <p style={styles.hint}>Restricted to admin accounts only</p>
+        <p style={styles.sub}>A Statewide Intelligent Women's Safety and Emergency Response Ecosystem</p>
+        {pendingAuth ? (
+          <form onSubmit={handleChangePass} style={styles.form}>
+            <p style={{color:'#f8f4ff', fontSize:14, marginBottom:10}}>
+              For security, you must change your temporary password before accessing the dashboard.
+            </p>
+            <div style={styles.field}>
+              <label style={styles.label}>New Password</label>
+              <input style={styles.input} type="password" value={newPass}
+                onChange={e => setNewPass(e.target.value)} placeholder="••••••••" required minLength={8} />
+            </div>
+            {err && <div style={styles.err}>⚠️ {err}</div>}
+            <button style={{...styles.btn, opacity: loading ? 0.6 : 1}} type="submit" disabled={loading}>
+              {loading ? 'Updating...' : 'Update Password & Sign In'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handle} style={styles.form}>
+            <div style={styles.field}>
+              <label style={styles.label}>Email or Admin ID</label>
+              <input style={styles.input} type="text" value={identifier}
+                onChange={e => setIdentifier(e.target.value)} placeholder="admin@safeher.ai or ADM-123" required />
+            </div>
+            <div style={styles.field}>
+              <label style={styles.label}>Password</label>
+              <input style={styles.input} type="password" value={pass}
+                onChange={e => setPass(e.target.value)} placeholder="••••••••" required />
+            </div>
+            {err && <div style={styles.err}>⚠️ {err}</div>}
+            <button style={{...styles.btn, opacity: loading ? 0.6 : 1}} type="submit" disabled={loading}>
+              {loading ? 'Signing in...' : '🔐 Sign In to Dashboard'}
+            </button>
+          </form>
+        )}
+        <p style={styles.hint}>Secure Government, Law Enforcement, and Public Service Portal</p>
       </div>
     </div>
   );

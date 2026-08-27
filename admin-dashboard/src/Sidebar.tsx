@@ -9,6 +9,10 @@ import {
   ShieldCheck,
   Bell,
   Activity,
+  FileText,
+  Radio,
+  UserCircle,
+  BrainCircuit,
 } from "lucide-react";
 import { useAdminAuth } from "./AuthContext";
 
@@ -44,48 +48,90 @@ export default function Sidebar() {
         }}
       />
 
-      <div style={{ ...s.navGroup, padding: collapsed ? "0 10px" : "0 12px" }}>
-        {!collapsed && <p style={s.navLabel}>Primary Monitoring</p>}
-        <NavItem
-          collapsed={collapsed}
-          to="/dashboard"
-          icon={LayoutDashboard}
-          label="Dashboard"
-        />
-        <NavItem
-          collapsed={collapsed}
-          to="/map"
-          icon={MapIcon}
-          label="Live Tactical Map"
-        />
-        <NavItem
-          collapsed={collapsed}
-          to="/users"
-          icon={Users}
-          label="Personnel Registry"
-        />
-        <NavItem
-          collapsed={collapsed}
-          to="/alerts"
-          icon={Bell}
-          label="Emergency Alerts"
-        />
-      </div>
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+        <div style={{ ...s.navGroup, padding: collapsed ? "0 10px" : "0 12px" }}>
+          {!collapsed && <p style={s.navLabel}>Primary Monitoring</p>}
+          <NavItem
+            collapsed={collapsed}
+            to="/dashboard"
+            icon={LayoutDashboard}
+            label="Dashboard"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/ai-intelligence"
+            icon={BrainCircuit}
+            label="AI Intelligence Center"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/map"
+            icon={MapIcon}
+            label="Live Tactical Map"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/users"
+            icon={Users}
+            label="Personnel Registry"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/alerts"
+            icon={Bell}
+            label="Emergency Alerts"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/complaints"
+            icon={FileText}
+            label="Complaints"
+          />
+        </div>
 
-      <div style={{ ...s.navGroup, padding: collapsed ? "0 10px" : "0 12px" }}>
-        {!collapsed && <p style={s.navLabel}>System Controls</p>}
-        <NavItem
-          collapsed={collapsed}
-          to="/analytics"
-          icon={Activity}
-          label="System Analytics"
-        />
-        <NavItem
-          collapsed={collapsed}
-          to="/settings"
-          icon={Settings}
-          label="Console Settings"
-        />
+        <div style={{ ...s.navGroup, padding: collapsed ? "0 10px" : "0 12px" }}>
+          {!collapsed && <p style={s.navLabel}>System Controls</p>}
+          <NavItem
+            collapsed={collapsed}
+            to="/broadcasts"
+            icon={Radio}
+            label="Emergency Broadcast"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/analytics"
+            icon={Activity}
+            label="System Analytics"
+          />
+          <NavItem
+            collapsed={collapsed}
+            to="/settings"
+            icon={Settings}
+            label="Console Settings"
+          />
+          {(user?.role === 'admin' || user?.role === 'super_admin') && (
+            <>
+              <NavItem
+                collapsed={collapsed}
+                to="/state-command"
+                icon={Activity}
+                label="State Command Center"
+              />
+              <NavItem
+                collapsed={collapsed}
+                to="/admin-management"
+                icon={ShieldCheck}
+                label="Admin Management"
+              />
+            </>
+          )}
+          <NavItem
+            collapsed={collapsed}
+            to="/profile"
+            icon={UserCircle}
+            label="Admin Profile"
+          />
+        </div>
       </div>
 
       <div style={s.footer}>
@@ -94,7 +140,12 @@ export default function Sidebar() {
           {!collapsed && (
             <div style={{ flex: 1, overflow: "hidden" }}>
               <p style={s.userName}>{user?.name || "Administrator"}</p>
-              <p style={s.userRole}>Level 1 Operator</p>
+              <p style={s.userRole}>
+                {user?.role === 'super_admin' || user?.role === 'admin' ? 'Statewide Operations' : 
+                 user?.role === 'regional_admin' ? `${user?.division} Operator` : 
+                 user?.role === 'district_admin' ? `${user?.district} Operator` : 
+                 'Level 1 Operator'}
+              </p>
             </div>
           )}
         </div>
@@ -200,6 +251,7 @@ const s: Record<string, React.CSSProperties> = {
     marginTop: "auto",
     padding: "20px",
     borderTop: "1px solid var(--border)",
+    flexShrink: 0,
   },
   userCard: {
     display: "flex",

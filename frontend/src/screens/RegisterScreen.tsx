@@ -63,7 +63,15 @@ export default function RegisterScreen({ navigation }: any) {
         });
       }
     } catch (err: any) {
-      Alert.alert('Registration Failed', err?.response?.data?.detail || 'Something went wrong.');
+      let message = 'Something went wrong.';
+      if (err?.response?.data?.detail) {
+        message = err.response.data.detail;
+      } else if (err?.response?.data?.error) {
+        message = err.response.data.error;
+      } else if (err?.message?.includes('Network Error') || !err?.response) {
+        message = 'Cannot connect to server. Please check if the backend is running and your device is on the same network.';
+      }
+      Alert.alert('Registration Failed', message);
     } finally {
       setLoading(false);
     }
@@ -83,7 +91,7 @@ export default function RegisterScreen({ navigation }: any) {
               <Ionicons name="person-add" size={32} color={Colors.white} />
             </View>
             <Text style={styles.heading}>Create Account</Text>
-            <Text style={styles.subheading}>Join SafeHer AI for your safety 💜</Text>
+            <Text style={styles.subheading}>A Statewide Intelligent Women's Safety and Emergency Response Ecosystem</Text>
           </View>
 
           <View style={styles.formCard}>

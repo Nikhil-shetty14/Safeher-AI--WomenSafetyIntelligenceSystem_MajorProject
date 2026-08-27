@@ -122,6 +122,10 @@ def format_user_response(user: dict) -> dict:
         "blood_group": user.get("blood_group"),
         "medical_conditions": user.get("medical_conditions"),
         "allergies": user.get("allergies"),
+        "division": user.get("division"),
+        "district": user.get("district"),
+        "admin_id": user.get("admin_id"),
+        "requires_password_change": user.get("requires_password_change", False),
         "safety_preferences": user.get("safety_preferences", {
             "sos_auto_activation": False,
             "shake_detection": False,

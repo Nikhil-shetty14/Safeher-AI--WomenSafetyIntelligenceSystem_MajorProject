@@ -10,6 +10,7 @@ from app.core.security import get_current_user, get_current_admin
 from app.core.config import settings
 from app.websockets.socket_manager import broadcast_to_admins
 from app.core.database import get_collection
+from app.api.routes.admin import get_alert_filter
 from loguru import logger
 import os, uuid, aiofiles, traceback, shutil
 from fastapi import Body
@@ -31,24 +32,26 @@ async def trigger_sos(
         logger.info(f"SOS TRIGGERED | User: {current_user.get('name')} ({current_user.get('_id')}) | Type: {alert_data.trigger_type}")
         alert_data.user_id = current_user["_id"]
 
-        # Quick AI analysis if message provided
+        # Quick AI analysis to generate Tactical Intelligence for EVERY trigger
         ai_analysis = None
-        if alert_data.message:
-            try:
-                ai_analysis = await analyze_text_for_danger(alert_data.message, alert_data.location.dict())
-                if ai_analysis and ai_analysis.get("fallback_active"):
-                    ai_fallback_used = True
-            except Exception as ai_err:
-                logger.error(f"SOS AI ERROR: {str(ai_err)}")
-                traceback.print_exc()
+        message_to_analyze = alert_data.message or f"User triggered an emergency {alert_data.trigger_type} SOS alert."
+        try:
+            ai_analysis = await analyze_text_for_danger(message_to_analyze, alert_data.location.dict())
+            if ai_analysis and ai_analysis.get("fallback_active"):
                 ai_fallback_used = True
-                ai_analysis = {
-                    "danger_level": "HIGH",
-                    "risk_score": 80,
-                    "emotion": "panic",
-                    "fallback_active": True,
-                    "fallback_reason": str(ai_err)
-                }
+        except Exception as ai_err:
+            logger.error(f"SOS AI ERROR: {str(ai_err)}")
+            traceback.print_exc()
+            ai_fallback_used = True
+            ai_analysis = {
+                "danger_level": "HIGH",
+                "risk_score": 85,
+                "emotion": "panic",
+                "summary": f"User triggered a critical {alert_data.trigger_type} SOS alert.",
+                "recommended_action": ["Attempt immediate contact verification", "Dispatch responders"],
+                "fallback_active": True,
+                "fallback_reason": str(ai_err)
+            }
 
         # Check emergency contacts to determine SMS status baseline
         try:
@@ -94,6 +97,29 @@ async def trigger_sos(
                 "severity": alert["severity"],
                 "location": location_payload,
             })
+
+            # Broadcast Tactical Intelligence Update
+            if ai_analysis:
+                recommendations = ai_analysis.get("recommendations") or ai_analysis.get("recommended_action")
+                if isinstance(recommendations, str):
+                    recommendations = [recommendations]
+                elif not recommendations:
+                    recommendations = ["Dispatch responders immediately."]
+                    
+                intelligence = {
+                    "risk_score": ai_analysis.get("risk_score", 85),
+                    "danger_level": ai_analysis.get("danger_level", "HIGH"),
+                    "ai_tactical_summary": ai_analysis.get("ai_tactical_summary") or ai_analysis.get("summary") or f"Emergency {alert_data.trigger_type} SOS triggered.",
+                    "recommendations": recommendations,
+                }
+                
+                await broadcast_to_admins("tactical_intel_update", {
+                    "alert_id": alert["_id"],
+                    "user_name": current_user.get("name"),
+                    "transcript": message_to_analyze,
+                    "intelligence": intelligence,
+                    "timestamp": timestamp
+                })
         except Exception as ws_err:
             logger.error(f"SOS WebSocket Broadcast failed: {str(ws_err)}")
             traceback.print_exc()
@@ -230,7 +256,9 @@ async def trigger_sos_with_voice(
             "user_name": current_user.get("name"),
             "transcript": transcript,
             "intelligence": intelligence,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "voice",
+            "audio_url": f"/api/sos/audio/{alert['_id']}"
         })
 
         return {
@@ -253,10 +281,15 @@ async def trigger_sos_with_voice(
 async def get_active_sos(
     skip: int = 0,
     limit: int = 50,
-    _: dict = Depends(get_current_admin)
+    current_admin: dict = Depends(get_current_admin)
 ):
     """Get all active SOS alerts (admin only)."""
-    alerts = await get_active_alerts(skip, limit)
+    alerts_col = get_collection("alerts")
+    if alerts_col is None:
+        return []
+    query = {"status": "active", **get_alert_filter(current_admin)}
+    cursor = alerts_col.find(query).sort([("priority_score", -1), ("created_at", -1)]).skip(skip).limit(limit)
+    alerts = await cursor.to_list(length=limit)
     return [await format_alert_response(a) for a in alerts]
 
 

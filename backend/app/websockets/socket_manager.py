@@ -7,14 +7,17 @@ from datetime import datetime
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",
-    logger=False,
-    engineio_logger=False,
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25,
+    max_http_buffer_size=1_000_000,
 )
 
 # Track connected users: {user_id: sid}
 connected_users: Dict[str, str] = {}
-# Track admin sockets
-admin_sockets: Set[str] = set()
+# Track admin sockets: {sid: {"role": role, "division": div, "district": dist}}
+admin_sockets: Dict[str, dict] = {}
 # Track live locations: {user_id: location_data}
 live_locations: Dict[str, dict] = {}
 
@@ -35,7 +38,7 @@ async def disconnect(sid):
             del connected_users[uid]
             break
 
-    admin_sockets.discard(sid)
+    admin_sockets.pop(sid, None)
     if user_id:
         live_locations.pop(user_id, None)
         logger.info(f"User {user_id} disconnected")
@@ -49,10 +52,14 @@ async def register_user(sid, data):
     user_id = data.get("user_id")
     role = data.get("role", "user")
 
-    if role == "admin":
-        admin_sockets.add(sid)
-        logger.info(f"Admin registered on socket: {sid}")
-        await sio.emit("registered", {"status": "ok", "role": "admin"}, to=sid)
+    if role in ["admin", "super_admin", "regional_admin", "district_admin"]:
+        admin_sockets[sid] = {
+            "role": role,
+            "division": data.get("division"),
+            "district": data.get("district")
+        }
+        logger.info(f"Admin registered on socket: {sid} | Role: {role}")
+        await sio.emit("registered", {"status": "ok", "role": role}, to=sid)
         return
 
     if user_id:
@@ -84,7 +91,7 @@ async def location_update(sid, data):
     live_locations[user_id] = location
 
     # Broadcast to all admins
-    for admin_sid in admin_sockets:
+    for admin_sid in admin_sockets.keys():
         await sio.emit("user_location_update", location, to=admin_sid)
 
 
@@ -103,10 +110,20 @@ async def sos_triggered(sid, data):
     }
 
     if admin_sockets:
-        # Broadcast to all admins
-        for admin_sid in admin_sockets:
-            await sio.emit("new_sos_alert", alert_broadcast, to=admin_sid)
-        logger.info(f"SOS broadcast to {len(admin_sockets)} admin(s) for user {user_id}")
+        # Broadcast to admins based on region
+        alert_district = location.get("district")
+        alert_division = location.get("division")
+        
+        for admin_sid, admin_data in admin_sockets.items():
+            role = admin_data.get("role")
+            if role in ["super_admin", "admin"] or not alert_district:
+                await sio.emit("new_sos_alert", alert_broadcast, to=admin_sid)
+            elif role == "regional_admin" and admin_data.get("division") == alert_division:
+                await sio.emit("new_sos_alert", alert_broadcast, to=admin_sid)
+            elif role == "district_admin" and admin_data.get("district") == alert_district:
+                await sio.emit("new_sos_alert", alert_broadcast, to=admin_sid)
+                
+        logger.info(f"SOS broadcast processed for user {user_id}")
     else:
         logger.info(f"SOS triggered by user {user_id}, but no admin(s) are currently connected to receive the broadcast.")
 
@@ -129,9 +146,35 @@ async def emit_to_user(user_id: str, event: str, data: dict):
 
 
 async def broadcast_to_admins(event: str, data: dict):
-    """Broadcast event to all connected admins."""
-    for admin_sid in admin_sockets:
-        await sio.emit(event, data, to=admin_sid)
+    """Broadcast event to admins, filtering by region if applicable."""
+    alert_district = None
+    alert_division = None
+    
+    # Try to extract location info from data
+    if "location" in data and isinstance(data["location"], dict):
+        alert_district = data["location"].get("district")
+        alert_division = data["location"].get("division")
+        
+    for admin_sid, admin_data in admin_sockets.items():
+        role = admin_data.get("role")
+        if role in ["super_admin", "admin"] or not alert_district:
+            await sio.emit(event, data, to=admin_sid)
+        elif role == "regional_admin" and admin_data.get("division") == alert_division:
+            await sio.emit(event, data, to=admin_sid)
+        elif role == "district_admin" and admin_data.get("district") == alert_district:
+            await sio.emit(event, data, to=admin_sid)
+
+
+async def broadcast_to_users(event: str, data: dict, user_ids: list = None):
+    """Broadcast event to all users or specific user_ids."""
+    if user_ids is not None:
+        for user_id in user_ids:
+            sid = connected_users.get(user_id)
+            if sid:
+                await sio.emit(event, data, to=sid)
+    else:
+        for sid in connected_users.values():
+            await sio.emit(event, data, to=sid)
 
 
 def get_connected_count() -> dict:

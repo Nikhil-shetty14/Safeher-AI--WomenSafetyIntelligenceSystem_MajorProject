@@ -19,13 +19,13 @@ export default function ContactsScreen() {
 
   useEffect(() => { fetchContacts(); }, []);
 
-  const fetchContacts = async () => {
-    setLoading(true);
+  const fetchContacts = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const res = await contactsAPI.getAll();
       setContacts(res.data || []);
     } catch { setContacts([]); }
-    setLoading(false);
+    if (showSpinner) setLoading(false);
   };
 
   const openAdd = () => {
@@ -41,20 +41,38 @@ export default function ContactsScreen() {
   };
 
   const save = async () => {
-    if (!form.name.trim() || !form.phone.trim()) {
-      return Alert.alert('Required', 'Name and phone are required.');
+    const cleanPhone = form.phone.replace(/[^0-9+]/g, '');
+    if (!form.name.trim() || cleanPhone.length < 10) {
+      return Alert.alert('Required', 'Name and valid phone number (min 10 digits) are required.');
     }
+    
     setSaving(true);
     try {
+      const payload = { ...form, phone: cleanPhone };
       if (editId) {
-        await contactsAPI.update(editId, form);
+        await contactsAPI.update(editId, payload);
       } else {
-        await contactsAPI.add(form);
+        await contactsAPI.add(payload);
       }
       setModal(false);
-      fetchContacts();
+      await fetchContacts(false);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to save contact.');
+      let errorMsg = 'Failed to save contact.';
+      
+      if (err?.response?.data) {
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          errorMsg = detail.map((d: any) => `${d.loc.join('.')} - ${d.msg}`).join('\n');
+        } else if (typeof detail === 'string') {
+          errorMsg = detail;
+        } else {
+          errorMsg = JSON.stringify(err.response.data);
+        }
+      } else if (err?.message) {
+        errorMsg = err.message;
+      }
+      
+      Alert.alert('Save Error', errorMsg);
     }
     setSaving(false);
   };

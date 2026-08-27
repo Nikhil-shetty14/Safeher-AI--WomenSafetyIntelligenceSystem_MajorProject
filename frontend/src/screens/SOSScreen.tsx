@@ -7,7 +7,7 @@ import * as Haptics from 'expo-haptics';
 import { Accelerometer } from 'expo-sensors';
 import { Audio } from 'expo-av';
 import * as TaskManager from 'expo-task-manager';
-import { sosAPI, aiAPI, contactsAPI } from '../api/client';
+import { sosAPI, aiAPI, contactsAPI, locationAPI } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../constants/theme';
@@ -33,6 +33,7 @@ export default function SOSScreen({ navigation, route }: any) {
   const headerTapRef = useRef(0);
   const countdownRef = useRef<any>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const sosLiveIntervalRef = useRef<any>(null);
 
   useEffect(() => {
     getLocation();
@@ -160,6 +161,35 @@ export default function SOSScreen({ navigation, route }: any) {
     } catch (e) {
       console.warn("Background location failed", e);
     }
+
+    // Start high-frequency SOS live location polling (every 7 seconds)
+    if (sosLiveIntervalRef.current) clearInterval(sosLiveIntervalRef.current);
+    sosLiveIntervalRef.current = setInterval(async () => {
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        await locationAPI.sosLive({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          accuracy: loc.coords.accuracy,
+          speed: loc.coords.speed,
+          heading: loc.coords.heading,
+          altitude: loc.coords.altitude,
+        });
+        console.log('SOS live location sent:', loc.coords.latitude, loc.coords.longitude);
+      } catch (err) {
+        console.warn('SOS live location update failed:', err);
+      }
+    }, 7000);
+  };
+
+  const stopLiveTracking = () => {
+    if (sosLiveIntervalRef.current) {
+      clearInterval(sosLiveIntervalRef.current);
+      sosLiveIntervalRef.current = null;
+    }
+    try {
+      Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+    } catch (_) {}
   };
 
   const startRecording = async () => {
@@ -295,28 +325,34 @@ export default function SOSScreen({ navigation, route }: any) {
   const handleVoiceSOS = async () => {
     try {
       if (isRecording) {
+        // Stop recording and get URI
         setIsRecording(false);
-        if (!recordingRef.current) return;
-        await recordingRef.current.stopAndUnloadAsync();
-        const uri = recordingRef.current.getURI();
+        await recordingRef.current?.stopAndUnloadAsync();
+        const uri = recordingRef.current?.getURI();
         recordingRef.current = null;
         if (!uri) return;
 
-        setPhase('sending');
+        // Prepare FormData for backend processing
         const formData = new FormData();
         const filename = uri.split('/').pop() || 'voice_sos.wav';
         formData.append('audio', { uri, name: filename, type: 'audio/wav' } as any);
-        const res = await aiAPI.analyzeVoice(formData);
-        const data = res.data;
-        setAnalyzeResult(data);
+        formData.append('user_id', user?.id || '');
+        formData.append('latitude', location?.latitude?.toString() || '0');
+        formData.append('longitude', location?.longitude?.toString() || '0');
 
-        if (data.trigger_emergency || ['high', 'critical'].includes(data.danger_level?.toLowerCase())) {
-          triggerSOS('voice');
+        // Upload and let backend handle AI analysis and SOS creation
+        const res = await sosAPI.triggerWithVoice(formData);
+        const data = res.data;
+        setAnalyzeResult(data.intelligence || data);
+
+        // Provide feedback based on AI intelligence
+        if (data.intelligence?.trigger_emergency || ['high', 'critical'].includes(data.intelligence?.danger_level?.toLowerCase())) {
+          Alert.alert('SOS Triggered', 'Emergency SOS has been activated based on voice analysis.');
         } else {
-          setPhase('idle');
-          Alert.alert('AI Analysis', `No immediate danger detected (${data.danger_level.toUpperCase()}). SOS not triggered.`);
+          Alert.alert('AI Analysis', `No immediate danger detected (${data.intelligence?.danger_level?.toUpperCase() || 'UNKNOWN'}).`);
         }
       } else {
+        // Start a new recording session
         const perm = await Audio.requestPermissionsAsync();
         if (perm.status !== 'granted') return;
         await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
@@ -326,8 +362,10 @@ export default function SOSScreen({ navigation, route }: any) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       }
     } catch (err) {
+      console.error('Voice SOS error', err);
       setIsRecording(false);
       setPhase('idle');
+      Alert.alert('Error', 'An error occurred while processing voice SOS.');
     }
   };
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 import uuid
-from app.models.user import UserCreate, UserLogin, UserUpdate, UserResponse
+from app.models.user import UserCreate, UserLogin, UserUpdate, UserResponse, ForgotPasswordRequest, ResetPasswordRequest
 from app.services.user_service import (
     authenticate_user, update_user, format_user_response
 )
@@ -39,62 +39,69 @@ async def register(user_data: UserCreate):
     Step 1 of Signup: Validate user details and send an OTP code
     to the registered phone number.
     """
-    users_collection = get_collection("users")
-    if users_collection is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-    # Check if phone is already taken
-    existing_user = await users_collection.find_one({"phone": user_data.phone})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
-
-    # Send OTP to user's phone number
     try:
-        otp_res = await send_otp(user_data.phone)
-    except Exception as e:
-        logger.error(f"Failed to send OTP during signup: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send verification code. Please try again.")
+        users_collection = get_collection("users")
+        if users_collection is None:
+            raise HTTPException(status_code=503, detail="Database unavailable")
 
-    # Create a secure pending session to hold registration data
-    pending_collection = get_collection("pending_sessions")
-    if pending_collection is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
+        # Check if phone is already taken
+        existing_user = await users_collection.find_one({"phone": user_data.phone})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Phone number already registered")
 
-    session_id = str(uuid.uuid4())
-    now = datetime.utcnow()
-    
-    session_doc = {
-        "_id": session_id,
-        "action": "signup",
-        "phone": user_data.phone,
-        "user_data": {
-            "name": user_data.name,
+        # Send OTP to user's phone number
+        try:
+            otp_res = await send_otp(user_data.phone)
+        except Exception as e:
+            logger.error(f"Failed to send OTP during signup: {e}")
+            raise HTTPException(status_code=500, detail="Failed to send verification code. Please try again.")
+
+        # Create a secure pending session to hold registration data
+        pending_collection = get_collection("pending_sessions")
+        if pending_collection is None:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+
+        session_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+        
+        session_doc = {
+            "_id": session_id,
+            "action": "signup",
             "phone": user_data.phone,
-            # Hash password immediately to maintain strict security
-            "hashed_password": get_password_hash(user_data.password),
-            "age": user_data.age,
-            "gender": user_data.gender,
-            "address": user_data.address,
-        },
-        "verification_method": otp_res["method"],
-        "otp_code": otp_res.get("code"),
-        "verification_sid": otp_res.get("verification_sid"),
-        "attempts": 0,
-        "resends_count": 0,
-        "last_sent_at": now,
-        "created_at": now,
-        "expires_at": now + timedelta(minutes=5),
-    }
+            "user_data": {
+                "name": user_data.name,
+                "phone": user_data.phone,
+                "email": user_data.email,
+                # Hash password immediately to maintain strict security
+                "hashed_password": get_password_hash(user_data.password),
+                "age": user_data.age,
+                "gender": user_data.gender,
+                "address": user_data.address,
+            },
+            "verification_method": otp_res["method"],
+            "otp_code": otp_res.get("code"),
+            "verification_sid": otp_res.get("verification_sid"),
+            "attempts": 0,
+            "resends_count": 0,
+            "last_sent_at": now,
+            "created_at": now,
+            "expires_at": now + timedelta(minutes=5),
+        }
 
-    await pending_collection.insert_one(session_doc)
-    
-    logger.info(f"2FA signup session created for {user_data.phone} | Session: {session_id}")
-    
-    return {
-        "status": "2fa_pending",
-        "session_id": session_id,
-        "phone": mask_phone_number(user_data.phone),
-    }
+        await pending_collection.insert_one(session_doc)
+        
+        logger.info(f"2FA signup session created for {user_data.phone} | Session: {session_id}")
+        
+        return {
+            "status": "2fa_pending",
+            "session_id": session_id,
+            "phone": mask_phone_number(user_data.phone),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration failed with unexpected error: {e}")
+        raise HTTPException(status_code=503, detail="Server is temporarily unavailable. Please check your connection and try again.")
 
 
 @router.post("/login")
@@ -213,6 +220,7 @@ async def verify_otp_endpoint(payload: VerifyOTPRequest):
             "_id": user_id,
             "name": user_data["name"],
             "phone": user_data["phone"],
+            "email": user_data.get("email"),
             "hashed_password": user_data["hashed_password"],
             "role": "user",
             "is_active": True,
@@ -338,6 +346,116 @@ async def resend_otp_endpoint(payload: ResendOTPRequest):
 
     logger.info(f"Resent OTP code successfully for session: {payload.session_id}")
     return {"message": "Verification code resent successfully"}
+
+
+
+@router.post("/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest):
+    """
+    Initiate password reset flow by sending OTP to the registered phone number.
+    """
+    users_collection = get_collection("users")
+    
+    try:
+        user = await users_collection.find_one({"phone": payload.phone})
+    except Exception as e:
+        logger.error(f"Database error during forgot-password lookup: {e}")
+        raise HTTPException(status_code=503, detail="Database connection error. Please try again later.")
+    if not user:
+        # Don't reveal whether user exists for security, just pretend it sent
+        raise HTTPException(status_code=404, detail="If this number is registered, an OTP will be sent.")
+
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    try:
+        otp_res = await send_otp(payload.phone)
+    except Exception as e:
+        logger.error(f"Failed to send OTP during forgot password: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send verification code. Please try again.")
+
+    pending_collection = get_collection("pending_sessions")
+    session_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+
+    session_doc = {
+        "_id": session_id,
+        "action": "forgot_password",
+        "phone": payload.phone,
+        "user_id": user["_id"],
+        "verification_method": otp_res["method"],
+        "otp_code": otp_res.get("code"),
+        "verification_sid": otp_res.get("verification_sid"),
+        "attempts": 0,
+        "resends_count": 0,
+        "last_sent_at": now,
+        "created_at": now,
+        "expires_at": now + timedelta(minutes=5),
+    }
+
+    await pending_collection.insert_one(session_doc)
+    logger.info(f"Forgot password session created for {payload.phone} | Session: {session_id}")
+
+    return {
+        "status": "2fa_pending",
+        "session_id": session_id,
+        "phone": mask_phone_number(payload.phone),
+    }
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPasswordRequest):
+    """
+    Verify OTP and reset the password.
+    """
+    pending_collection = get_collection("pending_sessions")
+    
+    try:
+        session = await pending_collection.find_one({"_id": payload.session_id})
+    except Exception as e:
+        logger.error(f"Database error during reset-password session lookup: {e}")
+        raise HTTPException(status_code=503, detail="Database connection error. Please try again later.")
+    
+    if not session or session["action"] != "forgot_password":
+        raise HTTPException(status_code=404, detail="Verification session not found or has expired.")
+
+    if datetime.utcnow() > session["expires_at"]:
+        await pending_collection.delete_one({"_id": payload.session_id})
+        raise HTTPException(status_code=400, detail="Verification code has expired. Please try again.")
+
+    if session["attempts"] >= 3:
+        await pending_collection.delete_one({"_id": payload.session_id})
+        raise HTTPException(status_code=400, detail="Too many incorrect attempts. This session has been blocked.")
+
+    is_valid = await verify_otp(session["phone"], payload.otp_code, session)
+
+    if not is_valid:
+        await pending_collection.update_one(
+            {"_id": payload.session_id},
+            {"$inc": {"attempts": 1}}
+        )
+        attempts_left = 2 - session["attempts"]
+        if attempts_left <= 0:
+            await pending_collection.delete_one({"_id": payload.session_id})
+            raise HTTPException(status_code=400, detail="Invalid verification code. Maximum attempts reached.")
+        raise HTTPException(status_code=400, detail=f"Invalid verification code. {attempts_left} attempts remaining.")
+
+    users_collection = get_collection("users")
+    if users_collection is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    # Update password
+    hashed_password = get_password_hash(payload.new_password)
+    await users_collection.update_one(
+        {"_id": session["user_id"]},
+        {"$set": {"hashed_password": hashed_password, "updated_at": datetime.utcnow()}}
+    )
+
+    # Clean up
+    await pending_collection.delete_one({"_id": payload.session_id})
+    logger.info(f"Password reset successful for {session['phone']}")
+
+    return {"message": "Password reset successfully"}
 
 
 @router.get("/me", response_model=UserResponse)

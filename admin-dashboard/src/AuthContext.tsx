@@ -3,8 +3,9 @@ import { adminAPI } from './api';
 
 interface AuthCtx {
   user: any; token: string | null; isAdmin: boolean;
-  login: (email: string, pass: string) => Promise<void>;
+  login: (identifier: string, pass: string) => Promise<any>;
   logout: () => void;
+  completeLogin: (token: string, user: any) => void;
 }
 const Ctx = createContext<AuthCtx | null>(null);
 
@@ -18,13 +19,23 @@ export const AdminAuthProvider = ({ children }: { children: React.ReactNode }) =
     if (t && u) { setToken(t); setUser(JSON.parse(u)); }
   }, []);
 
-  const login = async (email: string, pass: string) => {
-    const res = await adminAPI.login(email, pass);
-    if (res.data.user?.role !== 'admin') throw new Error('Admin access required');
-    localStorage.setItem('admin_token', res.data.access_token);
-    localStorage.setItem('admin_user', JSON.stringify(res.data.user));
-    setToken(res.data.access_token);
-    setUser(res.data.user);
+  const completeLogin = (t: string, u: any) => {
+    localStorage.setItem('admin_token', t);
+    localStorage.setItem('admin_user', JSON.stringify(u));
+    setToken(t);
+    setUser(u);
+  };
+
+  const login = async (identifier: string, pass: string) => {
+    const res = await adminAPI.login(identifier, pass);
+    if (!['admin', 'super_admin', 'regional_admin', 'district_admin'].includes(res.data.user?.role)) throw new Error('Admin access required');
+    
+    if (res.data.user?.requires_password_change) {
+      return res; // Skip setting local storage
+    }
+    
+    completeLogin(res.data.access_token, res.data.user);
+    return res;
   };
 
   const logout = () => {
@@ -34,7 +45,7 @@ export const AdminAuthProvider = ({ children }: { children: React.ReactNode }) =
   };
 
   return (
-    <Ctx.Provider value={{ user, token, isAdmin: !!user && user.role === 'admin', login, logout }}>
+    <Ctx.Provider value={{ user, token, isAdmin: !!user && ['admin', 'super_admin', 'regional_admin', 'district_admin'].includes(user.role), login, logout, completeLogin }}>
       {children}
     </Ctx.Provider>
   );
