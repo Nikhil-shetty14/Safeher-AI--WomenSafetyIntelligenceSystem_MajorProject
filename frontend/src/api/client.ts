@@ -2,15 +2,24 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const DEFAULT_API_HOST = 'http://10.165.16.100:8000';
+const DEFAULT_API_HOST = 'http://10.177.162.100:8000';
 
 export const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_HOST;
 console.log('SafeHer API host:', BASE_URL);
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000, // Increased timeout for slow mobile networks
+  timeout: 45000, // Generous timeout for endpoints that call local LLMs (Ollama phi3)
 });
+
+// ─── Auth State Sync ──────────────────────────────────
+// Allows AuthContext to register its logout callback so the 401 interceptor
+// can properly reset React state (user/token), not just clear AsyncStorage.
+let _onAuthExpired: (() => void) | null = null;
+
+export const setAuthExpiredCallback = (callback: () => void) => {
+  _onAuthExpired = callback;
+};
 
 // Attach JWT token to every request and log requests
 api.interceptors.request.use(async (config) => {
@@ -44,40 +53,72 @@ api.interceptors.response.use(
     }
 
     if (err.response?.status === 401) {
-      await AsyncStorage.removeItem('safeher_token');
-      await AsyncStorage.removeItem('safeher_user');
+      // Don't auto-logout on auth endpoints (login/register/verify) — those 401s
+      // are credential errors, not expired-token errors.
+      const isAuthEndpoint = config?.url?.includes('/api/auth/login') ||
+                             config?.url?.includes('/api/auth/register') ||
+                             config?.url?.includes('/api/auth/verify-otp');
+      if (!isAuthEndpoint) {
+        console.warn('[API] 401 on protected route — clearing auth state and forcing re-login');
+        await AsyncStorage.multiRemove(['safeher_token', 'safeher_user']);
+        if (_onAuthExpired) {
+          _onAuthExpired();
+        }
+      }
     }
     return Promise.reject(err);
   }
 );
 
-// Helper for robust multipart file uploads in React Native (bypassing Axios boundary bugs)
-const uploadMultipart = async (urlPath: string, formData: FormData) => {
-  try {
-    console.log(`[API Upload Request] POST ${BASE_URL}${urlPath}`);
-    const token = await AsyncStorage.getItem('safeher_token');
-    const response = await fetch(`${BASE_URL}${urlPath}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-    },
-      body: formData,
-    });
-    
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error: any = new Error(data.error || `Upload failed with status ${response.status}`);
-      error.response = { data };
-      throw error;
+// Helper for robust multipart file uploads in React Native.
+// Uses XMLHttpRequest instead of fetch because RN's fetch does NOT support
+// the { uri, name, type } FormDataPart pattern, while RN's XHR polyfill does.
+const uploadMultipart = (urlPath: string, formData: FormData): Promise<{ data: any; status: number }> => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      console.log(`[API Upload Request] POST ${BASE_URL}${urlPath}`);
+      const token = await AsyncStorage.getItem('safeher_token');
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE_URL}${urlPath}`);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      // Do NOT set Content-Type — XHR will set multipart/form-data with the correct boundary automatically.
+      xhr.timeout = 30000;
+
+      xhr.onload = () => {
+        let data: any = {};
+        try { data = JSON.parse(xhr.responseText); } catch (_) {}
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve({ data, status: xhr.status });
+        } else {
+          const error: any = new Error(data.error || `Upload failed with status ${xhr.status}`);
+          error.response = { data };
+          reject(error);
+        }
+      };
+
+      xhr.onerror = () => {
+        const error: any = new Error('Network request failed');
+        error.response = { data: { error: 'Network request failed' } };
+        reject(error);
+      };
+
+      xhr.ontimeout = () => {
+        const error: any = new Error('Upload timed out');
+        error.response = { data: { error: 'Upload timed out' } };
+        reject(error);
+      };
+
+      xhr.send(formData);
+    } catch (err: any) {
+      console.error(`[API Upload Error] POST ${BASE_URL}${urlPath} | Message: ${err.message}`);
+      if (!err.response) {
+        err.response = { data: { error: err.message } };
+      }
+      reject(err);
     }
-    return { data, status: response.status };
-  } catch (err: any) {
-    console.error(`[API Upload Error] POST ${BASE_URL}${urlPath} | Message: ${err.message}`);
-    if (!err.response) {
-      err.response = { data: { error: err.message } };
-    }
-    throw err;
-  }
+  });
 };
 
 // ─── Health Check ─────────────────────────────────────
@@ -117,6 +158,8 @@ export const sosAPI = {
     api.get(`/api/sos/my-alerts?skip=${skip}&limit=${limit}`),
   resolveAlert: (alertId: string) => api.patch(`/api/sos/${alertId}/resolve`),
   resolve: (alertId: string) => api.patch(`/api/sos/${alertId}/resolve`),
+  uploadPhotoEvidence: (formData: FormData) =>
+    uploadMultipart('/api/sos/upload-evidence', formData),
 };
 
 // ─── Contacts ─────────────────────────────────────────
@@ -159,7 +202,7 @@ export const aiAPI = {
     } catch (networkError: any) {
       console.error(`[AreaRisk] Network request failed. Retrying...`, networkError.message);
       try {
-        const retryResponse = await api.get(`/api/ai/area-risk?latitude=${lat}&longitude=${lng}`, { timeout: 20000 });
+        const retryResponse = await api.get(`/api/ai/area-risk?latitude=${lat}&longitude=${lng}`, { timeout: 6000 });
         console.log(`[AreaRisk] Retry succeeded`);
         return retryResponse;
       } catch (retryError: any) {
@@ -179,6 +222,7 @@ export const aiAPI = {
   getNearbyServices: (lat: number, lng: number) => api.get(`/api/ai/nearby-services?latitude=${lat}&longitude=${lng}`),
   getPredictionHistory: () => api.get('/api/ai/predictions/history'),
   predictRouteSafety: (data: any) => api.post('/api/ai/predict-route-safety', data),
+  predictiveGuardian: (data: any) => api.post('/api/ai/predictive-guardian', data),
 };
 
 // ─── Location ─────────────────────────────────────────
@@ -186,6 +230,7 @@ export const locationAPI = {
   update: (data: any) => api.post('/api/location/update', data),
   getHistory: (hours = 24) => api.get(`/api/location/history?hours=${hours}`),
   sosLive: (data: any) => api.post('/api/location/sos-live', data),
+  getHeatmap: () => api.get('/api/location/heatmap'),
 };
 
 // ─── Admin ────────────────────────────────────────────

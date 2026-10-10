@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F0A1E"
-    },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
@@ -29,6 +24,11 @@
       },
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.safeher.ai",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD7CyOPN_LvF_BCEZvwt-qARRVFzhHXLKQ"
+        }
+      },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -48,6 +48,15 @@
       [
         "expo-camera",
         { "cameraPermission": "Allow SafeHer AI to access your camera." }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0F0A1E"
+        }
       ]
     ],
     "extra": {

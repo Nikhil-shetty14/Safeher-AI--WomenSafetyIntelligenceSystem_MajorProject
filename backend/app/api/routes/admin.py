@@ -5,6 +5,7 @@ from app.core.database import get_collection
 from app.services.alert_service import get_active_alerts, format_alert_response
 from app.services.user_service import get_all_users, format_user_response
 from app.models.user import AdminUserUpdate, AdminCreate
+import os
 import uuid
 import secrets
 import string
@@ -15,22 +16,28 @@ from loguru import logger
 router = APIRouter(prefix="/api/admin", tags=["Admin Dashboard"])
 
 def get_alert_filter(admin: dict) -> dict:
-    role = admin.get("role")
-    if role in ["super_admin", "admin"]:
+    role = str(admin.get("role", "")).upper()
+    if role in ["CENTRAL_ADMIN", "SUPER_ADMIN"]:
         return {}
-    elif role == "regional_admin":
+    elif role in ["STATE_ADMIN", "ADMIN"]:
+        state = admin.get("state")
+        return {"location.state": state} if state else {}
+    elif role in ["DIVISION_ADMIN", "REGIONAL_ADMIN"]:
         return {"location.division": admin.get("division")}
-    elif role == "district_admin":
+    elif role in ["DISTRICT_ADMIN"]:
         return {"location.district": admin.get("district")}
     return {"_id": "unauthorized"}
 
 def get_user_filter(admin: dict) -> dict:
-    role = admin.get("role")
-    if role in ["super_admin", "admin"]:
+    role = str(admin.get("role", "")).upper()
+    if role in ["CENTRAL_ADMIN", "SUPER_ADMIN"]:
         return {}
-    elif role == "regional_admin":
+    elif role in ["STATE_ADMIN", "ADMIN"]:
+        state = admin.get("state")
+        return {"state": state} if state else {}
+    elif role in ["DIVISION_ADMIN", "REGIONAL_ADMIN"]:
         return {"division": admin.get("division")}
-    elif role == "district_admin":
+    elif role in ["DISTRICT_ADMIN"]:
         return {"district": admin.get("district")}
     return {"_id": "unauthorized"}
 
@@ -63,6 +70,20 @@ async def admin_login(credentials: AdminLoginRequest):
         "access_token": token,
         "token_type": "bearer",
         "user": format_user_response(user)
+    }
+
+
+@router.get("/me")
+async def get_admin_me(current_admin: dict = Depends(get_current_admin)):
+    """Get current admin profile and jurisdiction."""
+    return {
+        "id": current_admin.get("_id"),
+        "name": current_admin.get("name"),
+        "role": str(current_admin.get("role", "")).upper(),
+        "state": current_admin.get("state"),
+        "division": current_admin.get("division"),
+        "district": current_admin.get("district"),
+        "email": current_admin.get("email")
     }
 
 
@@ -568,84 +589,135 @@ async def delete_sub_admin(target_id: str, current_admin: dict = Depends(get_cur
 @router.get("/alerts/{alert_id}/intelligence")
 async def get_alert_intelligence(alert_id: str, current_admin: dict = Depends(get_current_admin)):
     """Comprehensive incident intelligence report for an SOS alert."""
-    alerts_col = get_collection("alerts")
-    users_col = get_collection("users")
-    contacts_col = get_collection("emergency_contacts")
-    history_col = get_collection("location_history")
-    complaints_col = get_collection("complaints")
+    try:
+        alerts_col = get_collection("alerts")
+        users_col = get_collection("users")
+        contacts_col = get_collection("emergency_contacts")
+        history_col = get_collection("location_history")
+        complaints_col = get_collection("complaints")
+        evidence_col = get_collection("photo_evidence")
 
-    if any(col is None for col in [alerts_col, users_col, contacts_col, history_col, complaints_col]):
-        raise HTTPException(status_code=503, detail="Database unavailable")
+        if any(col is None for col in [alerts_col, users_col, contacts_col, history_col, complaints_col]):
+            raise HTTPException(status_code=503, detail="Database unavailable")
 
-    alert = await alerts_col.find_one({"_id": alert_id})
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
+        alert = await alerts_col.find_one({"_id": alert_id})
+        if not alert:
+            alert = await alerts_col.find_one({"id": alert_id})
+        if not alert:
+            try:
+                from bson import ObjectId
+                alert = await alerts_col.find_one({"_id": ObjectId(alert_id)})
+            except Exception:
+                pass
+        if not alert:
+            raise HTTPException(status_code=404, detail="Alert not found")
 
-    user_id = alert["user_id"]
-    user = await users_col.find_one({"_id": user_id}) or {}
-    
-    contacts_cursor = contacts_col.find({"user_id": user_id})
-    contacts = await contacts_cursor.to_list(length=20)
-    
-    history_cursor = history_col.find({"user_id": user_id}).sort("timestamp", -1).limit(20)
-    history = await history_cursor.to_list(length=20)
-    
-    past_alerts_cursor = alerts_col.find({"user_id": user_id, "_id": {"$ne": alert_id}}).sort("created_at", -1)
-    past_alerts = await past_alerts_cursor.to_list(length=20)
-    
-    complaints_cursor = complaints_col.find({"user_id": user_id}).sort("created_at", -1)
-    complaints = await complaints_cursor.to_list(length=20)
+        def safe_ts(val):
+            """Convert datetime or any timestamp to ISO string safely."""
+            if val is None:
+                return None
+            if hasattr(val, "isoformat"):
+                return val.isoformat()
+            return str(val)
 
-    # Format the data cleanly
-    intel = {
-        "incident_id": alert["_id"],
-        "status": alert.get("status", "active"),
-        "severity": alert.get("severity", "medium"),
-        "trigger_type": alert.get("trigger_type", "unknown"),
-        "created_at": alert.get("created_at"),
-        "resolved_at": alert.get("resolved_at"),
-        "message": alert.get("message"),
-        "location": alert.get("location", {}),
-        "ai_analysis": alert.get("ai_analysis", {}),
-        "audio_file_path": alert.get("audio_file_path"),
-        "contacts_notified": alert.get("contacts_notified", []),
-        
-        "subject_personnel": {
-            "user_id": user.get("_id"),
-            "name": user.get("name", "Unknown"),
-            "email": user.get("email"),
-            "phone": user.get("phone"),
-            "blood_group": user.get("blood_group", "Unknown"),
-            "medical_conditions": user.get("medical_conditions", "None listed"),
-            "district": user.get("district"),
-            "division": user.get("division"),
-        },
-        
-        "emergency_contacts": [
-            {
-                "name": c.get("name"),
-                "phone": c.get("phone"),
-                "relationship": c.get("relationship")
-            } for c in contacts
-        ],
-        
-        "live_movement": [
-            {
-                "latitude": h.get("latitude"),
-                "longitude": h.get("longitude"),
-                "timestamp": h.get("timestamp")
-            } for h in history
-        ],
-        
-        "history": {
-            "past_alerts": len(past_alerts),
-            "past_complaints": len(complaints),
-            "recent_complaints": [
-                {"id": c["_id"], "subject": c.get("subject"), "status": c.get("status")}
-                for c in complaints[:5]
-            ]
+        user_id = alert.get("user_id")
+        user = {}
+        contacts = []
+        history = []
+        past_alerts = []
+        complaints = []
+
+        if user_id:
+            user = await users_col.find_one({"_id": user_id}) or {}
+            contacts_cursor = contacts_col.find({"user_id": user_id})
+            contacts = await contacts_cursor.to_list(length=20)
+            
+            history_cursor = history_col.find({"user_id": user_id}).sort("timestamp", -1).limit(20)
+            history = await history_cursor.to_list(length=20)
+            
+            past_alerts_cursor = alerts_col.find({"user_id": user_id, "_id": {"$ne": alert_id}}).sort("created_at", -1)
+            past_alerts = await past_alerts_cursor.to_list(length=20)
+            
+            complaints_cursor = complaints_col.find({"user_id": user_id}).sort("created_at", -1)
+            complaints = await complaints_cursor.to_list(length=20)
+
+        photo_evidence = []
+        if evidence_col is not None:
+            evidence_cursor = evidence_col.find({"alert_id": alert_id}).sort("timestamp", 1)
+            evidence_docs = await evidence_cursor.to_list(length=50)
+            for doc in evidence_docs:
+                filename = os.path.basename(doc.get("photo_path", ""))
+                photo_evidence.append({
+                    "id": str(doc["_id"]),
+                    "photo_path": doc.get("photo_path"),
+                    "url": f"/uploads/{filename}" if filename else f"/api/sos/evidence/photo/{str(doc['_id'])}",
+                    "timestamp": safe_ts(doc.get("timestamp")),
+                    "location": doc.get("location", {})
+                })
+
+        # Format the data cleanly
+        audio_path = alert.get("audio_file_path")
+        audio_url = None
+        if audio_path:
+            audio_url = f"/uploads/{os.path.basename(audio_path)}"
+
+        intel = {
+            "incident_id": alert["_id"],
+            "status": alert.get("status", "active"),
+            "severity": alert.get("severity", "medium"),
+            "trigger_type": alert.get("trigger_type", "unknown"),
+            "created_at": safe_ts(alert.get("created_at")),
+            "resolved_at": safe_ts(alert.get("resolved_at")),
+            "message": alert.get("message"),
+            "location": alert.get("location", {}),
+            "ai_analysis": alert.get("ai_analysis", {}),
+            "audio_file_path": audio_path,
+            "audio_url": audio_url,
+            "contacts_notified": alert.get("contacts_notified", []),
+            "photo_evidence": photo_evidence,
+            
+            "subject_personnel": {
+                "user_id": user.get("_id"),
+                "name": user.get("name", "Unknown"),
+                "email": user.get("email"),
+                "phone": user.get("phone"),
+                "blood_group": user.get("blood_group", "Unknown"),
+                "medical_conditions": user.get("medical_conditions", "None listed"),
+                "district": user.get("district"),
+                "division": user.get("division"),
+            },
+            
+            "emergency_contacts": [
+                {
+                    "name": c.get("name"),
+                    "phone": c.get("phone"),
+                    "relationship": c.get("relationship")
+                } for c in contacts
+            ],
+            
+            "live_movement": [
+                {
+                    "latitude": h.get("latitude"),
+                    "longitude": h.get("longitude"),
+                    "timestamp": safe_ts(h.get("timestamp"))
+                } for h in history
+            ],
+            
+            "history": {
+                "past_alerts": len(past_alerts),
+                "past_complaints": len(complaints),
+                "recent_complaints": [
+                    {"id": c["_id"], "subject": c.get("subject"), "status": c.get("status")}
+                    for c in complaints[:5]
+                ]
+            }
         }
-    }
-    
-    return intel
+        
+        return intel
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Intelligence report failed for alert {alert_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate intelligence report: {str(e)}")
 

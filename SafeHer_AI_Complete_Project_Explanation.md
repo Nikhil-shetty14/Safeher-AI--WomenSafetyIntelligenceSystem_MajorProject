@@ -1,5 +1,6 @@
-# SafeHer AI — Women Safety Intelligence System
-## Complete Project Technical Architecture, Algorithms & Implementation Document
+# SafeHer AI – AI-Powered Women Safety Intelligence System
+## Core AI Intelligence Layer, Architecture & Implementation Document
+> **Tagline:** Detect. Understand. Predict. Protect.
 
 ---
 
@@ -12,19 +13,30 @@ Women's personal safety in urban and suburban environments remains a pressing gl
 * **Blind Routing:** Standard GPS navigation routes users through the shortest path regardless of lighting conditions, historical crime hotspots, or active distress alerts.
 * **Fragmented Emergency Dispatch:** Lack of unified, real-time telemetry streaming to family members and jurisdictional police command authorities simultaneously.
 
-### 1.2 Solution: SafeHer AI
-**SafeHer AI** is an end-to-end, multi-tiered AI and IoT-enabled Women Safety Intelligence Platform. It couples a cross-platform mobile client (React Native / Expo) with a high-throughput asynchronous backend (FastAPI / Motor / MongoDB Atlas), a state-wide Tactical Command Center (React.js / Vite / TailwindCSS / Socket.IO), and on-device/local AI intelligence engines (Ollama Phi-3 / OpenAI Whisper / Librosa Acoustic Signal Processing).
+### 1.2 The AI Intelligence Engine Solution
+**SafeHer AI** is not just an emergency trigger; it is an end-to-end, multi-tiered **AI Intelligence Engine** that connects and enhances every safety function. 
+At its core, the system operates on a unified intelligence workflow:
+**User Signals → AI Intelligence Engine → Threat/Risk Assessment → Prediction & Decision → Emergency Response → Admin Intelligence**
+
+The **AI Intelligence Engine** serves as the central brain of SafeHer AI, seamlessly integrating:
+- **AI Threat Detection:** Analyzes emergency signals and classifies them as LOW, MEDIUM, HIGH, or CRITICAL.
+- **AI Voice Intelligence:** Combines OpenAI Whisper (Speech-to-Text) with Librosa (Acoustic Stress Analysis).
+- **AI Risk Assessment:** Aggregates voice, GPS, SOS telemetry, and behavioral context for a unified risk score.
+- **AI Predictive Safe Routing:** Identifies safer routes actively avoiding dynamic danger zones and historical hotspots.
+- **AI Behavioral Analysis:** Detects cross-track route deviation, abnormal dwell times, and unlit zone stagnation.
+- **AI Emergency Decision Engine:** Determines the appropriate emergency escalation (silent alert vs. full Twilio dispatch).
+- **AI Admin Intelligence:** Feeds jurisdictional command centers with threat summaries, risk insights, and emergency intelligence.
 
 ---
 
 ## 2. Core Objectives
 
-* **Zero/Low-Friction SOS Activation:** Instant emergency triggering via high-gravity physical device shakes ($> 3G$), continuous acoustic voice triggers ("Help me", "Save me", screams), or one-touch emergency UI triggers.
-* **Dual-Layer Threat Detection Engine:** Concurrent execution of acoustic feature extraction (pitch, RMS energy, ZCR, MFCCs) and NLP deep threat classification (Ollama / Phi-3 Mini) with automatic SOS escalation.
-* **Safety-Weighted A\* Predictive Navigation:** Real-time pathfinding across a dynamically weighted geographic coordinate grid, routing users around dynamic danger zones and active distress hotspots.
-* **Autonomous Live Walk Watch (SafeTimer):** Automated check-in monitoring with cross-track route deviation tracking and automatic countdown escalation.
-* **Decentralized Multi-Tier Police Dispatch:** Automated geospatial mapping to jurisdictional divisions and districts (e.g., Karnataka's 4 Revenue Divisions and 31 Districts) with live WebSocket telemetry.
-* **Multi-Channel Contact Dispatch:** Instant automated Twilio Programmable SMS containing live Google Maps pinpoint links and automated TwiML Voice calls.
+* **Zero/Low-Friction SOS Activation:** Instant emergency triggering via high-gravity physical device shakes ($> 3G$) or continuous acoustic voice triggers.
+* **Dual-Layer Threat Detection Engine:** Concurrent execution of acoustic feature extraction and NLP deep threat classification (Ollama / Phi-3 Mini) providing autonomous SOS escalation.
+* **AI Predictive Safe Routing:** Real-time pathfinding across a dynamically weighted geographic coordinate grid, routing users safely.
+* **AI Behavioral Walk Watch (SafeTimer):** Automated check-in monitoring with cross-track route deviation tracking and automatic countdown escalation.
+* **Decentralized Multi-Tier Police Dispatch:** Automated geospatial mapping to jurisdictional divisions and districts with live WebSocket telemetry.
+* **Multi-Channel Contact Dispatch:** Instant automated Twilio Programmable SMS and TwiML Voice calls driven by the AI Decision Engine.
 
 ---
 

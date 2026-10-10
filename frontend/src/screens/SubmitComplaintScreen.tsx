@@ -29,8 +29,13 @@ export default function SubmitComplaintScreen({ navigation }: any) {
         Alert.alert('Permission denied', 'Location permission is required to capture GPS.');
         return;
       }
-      const loc = await Location.getCurrentPositionAsync({});
-      setLocation(loc);
+      let loc;
+      try {
+        loc = await Location.getCurrentPositionAsync({});
+      } catch {
+        loc = await Location.getLastKnownPositionAsync();
+      }
+      if (loc) setLocation(loc);
     })();
   }, []);
 

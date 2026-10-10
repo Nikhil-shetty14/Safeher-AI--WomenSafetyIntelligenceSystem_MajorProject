@@ -26,6 +26,7 @@ import SubmitComplaintScreen from '../screens/SubmitComplaintScreen';
 import MyComplaintsScreen from '../screens/MyComplaintsScreen';
 import NotificationScreen from '../screens/NotificationScreen';
 import BroadcastModal from '../components/BroadcastModal';
+import PredictiveGuardianOverlay from '../components/PredictiveGuardianOverlay';
 import AIIntelligenceScreen from '../screens/AIIntelligenceScreen';
 
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
@@ -39,6 +40,11 @@ const TabNavigator = () => (
     screenOptions={({ route }) => ({
       headerShown: false,
       tabBarHideOnKeyboard: true,
+      // CRITICAL: Keep screens mounted when switching tabs
+      // This prevents MapView from being destroyed and re-created (causing black flash)
+      unmountOnBlur: false,
+      freezeOnBlur: true,
+      lazy: true,
       tabBarStyle: {
         backgroundColor: Colors.backgroundSecondary,
         borderTopColor: Colors.cardBorder,
@@ -134,7 +140,12 @@ export default function AppNavigator() {
           </>
         )}
       </Stack.Navigator>
-      {isAuthenticated && <BroadcastModal />}
+      {isAuthenticated && (
+        <>
+          <BroadcastModal />
+          <PredictiveGuardianOverlay />
+        </>
+      )}
     </NavigationContainer>
   );
 }

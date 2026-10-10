@@ -50,12 +50,15 @@ async def add_contact(
 @router.get("")
 async def get_contacts(current_user: dict = Depends(get_current_user)):
     """Get all emergency contacts for current user."""
-    collection = get_collection("emergency_contacts")
-    if collection is None:
+    try:
+        collection = get_collection("emergency_contacts")
+        if collection is None:
+            return []
+        cursor = collection.find({"user_id": current_user["_id"]}).sort("is_primary", -1)
+        contacts = await cursor.to_list(length=10)
+        return [_format_contact(c) for c in contacts]
+    except Exception as e:
         return []
-    cursor = collection.find({"user_id": current_user["_id"]}).sort("is_primary", -1)
-    contacts = await cursor.to_list(length=10)
-    return [_format_contact(c) for c in contacts]
 
 
 @router.put("/{contact_id}", response_model=EmergencyContactResponse)

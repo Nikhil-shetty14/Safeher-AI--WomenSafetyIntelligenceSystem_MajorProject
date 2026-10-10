@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authAPI } from '../api/client';
+import { authAPI, setAuthExpiredCallback } from '../api/client';
 
 interface User {
   id: string;
@@ -44,6 +44,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     loadStoredAuth();
+
+    // Register the 401-expired callback so the API client can force a
+    // full auth-state reset (not just AsyncStorage clear) when a
+    // protected-route request comes back 401.
+    setAuthExpiredCallback(() => {
+      console.warn('[AuthContext] Token expired — resetting auth state');
+      setToken(null);
+      setUser(null);
+    });
   }, []);
 
   const loadStoredAuth = async () => {

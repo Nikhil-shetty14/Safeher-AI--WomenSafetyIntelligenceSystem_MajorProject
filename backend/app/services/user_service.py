@@ -60,12 +60,28 @@ async def create_user(user_data: UserCreate) -> dict:
     return user_doc
 
 
+def get_phone_variants(phone: str) -> list:
+    """Generate all common representations of a phone number to guarantee matching."""
+    if not phone:
+        return []
+    digits = "".join(c for c in phone if c.isdigit())
+    variants = [phone.strip()]
+    if len(digits) == 10:
+        variants.extend([digits, f"+91{digits}", f"91{digits}"])
+    elif digits.startswith("91") and len(digits) == 12:
+        variants.extend([digits[2:], f"+{digits}", digits])
+    elif digits:
+        variants.extend([digits, f"+{digits}"])
+    return list(set(v for v in variants if v))
+
+
 async def authenticate_user(phone: str, password: str) -> Optional[dict]:
     collection = get_collection("users")
     if collection is None:
         return None
 
-    user = await collection.find_one({"phone": phone})
+    variants = get_phone_variants(phone)
+    user = await collection.find_one({"phone": {"$in": variants}})
     if not user:
         return None
     if not verify_password(password, user["hashed_password"]):

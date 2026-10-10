@@ -1,7 +1,15 @@
+import os
+import tempfile
+
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "safeher_mpl"))
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
+
 import io
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
 import matplotlib
+# Use non-interactive backend for matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

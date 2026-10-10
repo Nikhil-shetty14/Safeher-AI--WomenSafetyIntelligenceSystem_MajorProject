@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { sosAPI, contactsAPI } from '../api/client';
+import { sosAPI, contactsAPI, aiAPI } from '../api/client';
 import { Colors, Typography, Spacing, BorderRadius, Shadows, getSeverityColor } from '../constants/theme';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
@@ -18,13 +18,14 @@ export default function HomeScreen({ navigation }: any) {
   const { user } = useAuth();
   const { isConnected, dangerAlerts } = useSocket();
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [safetyScore, setSafetyScore] = useState(85);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [locName, setLocName] = useState('Locating...');
   const [isOffline, setIsOffline] = useState(false);
   const [primaryContact, setPrimaryContact] = useState<any>(null);
+  const [aiRisk, setAiRisk] = useState<any>(null);
+  const [riskLoading, setRiskLoading] = useState(true);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -131,7 +132,17 @@ export default function HomeScreen({ navigation }: any) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        let loc;
+        try {
+          loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        } catch {
+          loc = await Location.getLastKnownPositionAsync();
+        }
+        if (!loc) {
+          setLocName('Location unavailable');
+          setRiskLoading(false);
+          return;
+        }
         setLocation(loc);
         const reverseGeocode = await Location.reverseGeocodeAsync(loc.coords);
         if (reverseGeocode.length > 0) {
@@ -139,11 +150,28 @@ export default function HomeScreen({ navigation }: any) {
         } else {
           setLocName(`${loc.coords.latitude.toFixed(4)}, ${loc.coords.longitude.toFixed(4)}`);
         }
+        // Fetch AI area risk using real backend data
+        fetchAIRisk(loc.coords.latitude, loc.coords.longitude);
       } else {
         setLocName('GPS Disabled');
+        setRiskLoading(false);
       }
     } catch {
       setLocName('Location Error');
+      setRiskLoading(false);
+    }
+  };
+
+  const fetchAIRisk = async (lat: number, lng: number) => {
+    setRiskLoading(true);
+    try {
+      const res = await aiAPI.getAreaRisk(lat, lng);
+      setAiRisk(res.data);
+    } catch (err) {
+      console.warn('AI Risk fetch failed', err);
+      setAiRisk({ risk_level: 'medium', confidence: 0.5, factors: ['Unable to assess'], recommendation: 'Stay alert.' });
+    } finally {
+      setRiskLoading(false);
     }
   };
 
@@ -154,14 +182,16 @@ export default function HomeScreen({ navigation }: any) {
     setRefreshing(false);
   };
 
-  const getSafetyStatus = () => {
-    if (safetyScore >= 80) return { label: 'SAFE', color: Colors.success, risk: 'Low Risk Area' };
-    if (safetyScore >= 60) return { label: 'MEDIUM RISK', color: Colors.warning, risk: 'Be Cautious' };
-    if (safetyScore >= 40) return { label: 'HIGH RISK', color: Colors.danger, risk: 'Unsafe Zone' };
-    return { label: 'CRITICAL', color: Colors.severityCritical, risk: 'Leave Immediately' };
+  const getAIRiskStatus = () => {
+    const level = (aiRisk?.risk_level || 'medium').toLowerCase();
+    if (level === 'safe' || level === 'low') return { label: 'SAFE', color: Colors.success, icon: 'shield-checkmark' as const, advice: 'Low risk area' };
+    if (level === 'medium') return { label: 'MEDIUM', color: Colors.warning, icon: 'alert-circle' as const, advice: 'Stay cautious' };
+    if (level === 'high') return { label: 'HIGH', color: Colors.danger, icon: 'warning' as const, advice: 'Be alert — elevated risk' };
+    return { label: 'CRITICAL', color: Colors.severityCritical, icon: 'skull' as const, advice: 'Leave area immediately' };
   };
 
-  const safetyInfo = getSafetyStatus();
+  const riskInfo = getAIRiskStatus();
+  const hasActiveAlert = recentAlerts.some((a: any) => a.status === 'active');
 
   const handleSOSTrigger = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -206,46 +236,83 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           </View>
 
-          {/* AI Intelligence Center Banner */}
-          <TouchableOpacity 
-            style={styles.aiBanner}
-            onPress={() => navigation.navigate('AIIntelligence')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.aiBannerLeft}>
-              <View style={styles.aiIconWrapper}>
-                <Ionicons name="sparkles" size={22} color={Colors.primaryLight} />
+          {/* ── AI SAFETY GUARDIAN CARD ────────────────── */}
+          <View style={guardianStyles.guardianCard}>
+            <View style={guardianStyles.guardianHeader}>
+              <View style={guardianStyles.guardianHeaderLeft}>
+                <View style={[guardianStyles.guardianIcon, { backgroundColor: riskInfo.color + '20' }]}>
+                  <Ionicons name="sparkles" size={20} color={riskInfo.color} />
+                </View>
+                <View>
+                  <Text style={guardianStyles.guardianTitle}>AI Safety Guardian</Text>
+                  <Text style={guardianStyles.guardianPowered}>Detect. Understand. Predict. Protect.</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.aiBannerTitle}>AI Intelligence Center</Text>
-                <Text style={styles.aiBannerSub}>Powered by Ollama Local LLM</Text>
-              </View>
+              <TouchableOpacity onPress={() => navigation.navigate('AIIntelligence')} style={guardianStyles.aiLiveBadge}>
+                <View style={[guardianStyles.aiLiveDot, { backgroundColor: riskInfo.color }]} />
+                <Text style={[guardianStyles.aiLiveText, { color: riskInfo.color }]}>AI LIVE</Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.aiBadge}>
-              <View style={styles.aiBadgeDot} />
-              <Text style={styles.aiBadgeText}>AI LIVE</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={Colors.primaryLight} style={{marginLeft: 10}} />
-          </TouchableOpacity>
 
-          {/* AI Safety Status Indicator & GPS Card Combined */}
-          <View style={styles.statusGrid}>
-            <View style={[styles.statusCard, { borderColor: safetyInfo.color + '40' }]}>
-              <Text style={styles.cardSubtitle}>AI Safety Status</Text>
-              <Text style={[styles.statusMainText, { color: safetyInfo.color }]}>{safetyInfo.label}</Text>
-              <Text style={styles.statusSubText}>{safetyInfo.risk}</Text>
-              <View style={[styles.statusIndicator, { backgroundColor: safetyInfo.color }]} />
+            {/* Risk Level */}
+            <View style={[guardianStyles.riskBanner, { backgroundColor: riskInfo.color + '12', borderColor: riskInfo.color + '30' }]}>
+              <Ionicons name={riskInfo.icon} size={28} color={riskInfo.color} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={{ fontSize: 11, color: Colors.textMuted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>Current Risk Level</Text>
+                <Text style={{ fontSize: 22, fontWeight: '900', color: riskInfo.color, marginTop: 2 }}>
+                  {riskLoading ? 'ANALYZING...' : riskInfo.label}
+                </Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ fontSize: 10, color: Colors.textMuted }}>Confidence</Text>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: riskInfo.color }}>{aiRisk?.confidence ? `${Math.round(aiRisk.confidence * 100)}%` : '—'}</Text>
+              </View>
             </View>
-            
-            <View style={styles.statusCard}>
-              <Text style={styles.cardSubtitle}>Live GPS</Text>
-              <Text style={styles.locNameText} numberOfLines={1}>{locName}</Text>
-              <Text style={styles.statusSubText}>
-                {location ? `Acc: ±${Math.round(location.coords.accuracy || 0)}m` : 'Finding GPS...'}
-              </Text>
-              <Ionicons name="location" size={20} color={location ? Colors.primary : Colors.textMuted} style={styles.locIcon} />
+
+            {/* Status Grid */}
+            <View style={guardianStyles.statusRow}>
+              <View style={guardianStyles.statusItem}>
+                <Ionicons name="navigate-circle" size={18} color={Colors.primaryLight} />
+                <Text style={guardianStyles.statusLabel}>Journey</Text>
+                <Text style={guardianStyles.statusValue}>{hasActiveAlert ? 'SOS ACTIVE' : 'Monitoring'}</Text>
+              </View>
+              <View style={[guardianStyles.statusDivider]} />
+              <View style={guardianStyles.statusItem}>
+                <Ionicons name="location" size={18} color={location ? Colors.success : Colors.textMuted} />
+                <Text style={guardianStyles.statusLabel}>GPS</Text>
+                <Text style={guardianStyles.statusValue} numberOfLines={1}>{locName}</Text>
+              </View>
+              <View style={[guardianStyles.statusDivider]} />
+              <View style={guardianStyles.statusItem}>
+                <Ionicons name="git-branch" size={18} color={Colors.primaryLight} />
+                <Text style={guardianStyles.statusLabel}>Route</Text>
+                <Text style={guardianStyles.statusValue}>Normal</Text>
+              </View>
             </View>
+
+            {/* AI Recommendation */}
+            {aiRisk?.recommendation && !riskLoading && (
+              <View style={guardianStyles.recommendationBox}>
+                <Ionicons name="bulb" size={16} color={Colors.primaryLight} />
+                <Text style={guardianStyles.recommendationText} numberOfLines={2}>
+                  {aiRisk.recommendation}
+                </Text>
+              </View>
+            )}
           </View>
+
+          {/* AI HIGH/CRITICAL Warning Banner */}
+          {!riskLoading && aiRisk && ['high', 'critical'].includes((aiRisk.risk_level || '').toLowerCase()) && (
+            <View style={[guardianStyles.warningBanner, { borderLeftColor: riskInfo.color }]}>
+              <Ionicons name="alert-circle" size={22} color={riskInfo.color} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={{ color: riskInfo.color, fontSize: 13, fontWeight: '800' }}>⚠ AI Threat Warning</Text>
+                <Text style={{ color: Colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  {aiRisk.factors?.[0] || riskInfo.advice}
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Large Emergency SOS Button in Center */}
           <View style={styles.sosContainer}>
@@ -278,13 +345,13 @@ export default function HomeScreen({ navigation }: any) {
              </TouchableOpacity>
           </View>
 
-          {/* Real-Time Danger Alerts */}
+          {/* Real-Time Danger Alerts from Socket */}
           {dangerAlerts && dangerAlerts.length > 0 && (
              <View style={styles.dangerAlertBox}>
                 <Ionicons name="warning" size={24} color={Colors.danger} />
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.dangerAlertTitle}>Nearby Incident Detected</Text>
-                  <Text style={styles.dangerAlertText}>High risk activity reported 2km away.</Text>
+                  <Text style={styles.dangerAlertText}>Active SOS reported nearby. Stay alert.</Text>
                 </View>
              </View>
           )}
@@ -364,33 +431,6 @@ const styles = StyleSheet.create({
   bellBtn: { position: 'relative', marginRight: 8, padding: 4 },
   bellBadge: { position: 'absolute', top: 4, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.danger },
   profileBtn: {},
-  
-  statusGrid: { flexDirection: 'row', paddingHorizontal: Spacing.lg, gap: Spacing.md, marginTop: Spacing.md },
-  
-  aiBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: Colors.card, marginHorizontal: Spacing.lg, marginTop: Spacing.md,
-    padding: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.primaryLight + '40',
-    ...Shadows.card
-  },
-  aiBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  aiIconWrapper: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.primaryLight + '20', alignItems: 'center', justifyContent: 'center' },
-  aiBannerTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
-  aiBannerSub: { fontSize: 11, color: Colors.textMuted, marginTop: 2, fontWeight: '600' },
-  aiBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.danger + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: Colors.danger + '40' },
-  aiBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.danger, marginRight: 6 },
-  aiBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.danger, letterSpacing: 0.5 },
-
-  statusCard: { 
-    flex: 1, backgroundColor: Colors.card, borderRadius: BorderRadius.xl, padding: Spacing.md, 
-    borderWidth: 1, borderColor: Colors.cardBorder, ...Shadows.card, position: 'relative', overflow: 'hidden'
-  },
-  cardSubtitle: { fontSize: 11, color: Colors.textMuted, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 },
-  statusMainText: { fontSize: 20, fontWeight: '900', letterSpacing: 0.5 },
-  statusSubText: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  statusIndicator: { position: 'absolute', top: 0, right: 0, width: 4, height: '100%' },
-  locNameText: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  locIcon: { position: 'absolute', right: 16, top: 16, opacity: 0.2 },
 
   sosContainer: { alignItems: 'center', justifyContent: 'center', marginVertical: 40 },
   sosWrapper: { alignItems: 'center', justifyContent: 'center' },
@@ -436,4 +476,45 @@ const styles = StyleSheet.create({
   systemStatusRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 12, marginTop: 30, paddingHorizontal: Spacing.lg },
   sysTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.backgroundSecondary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, gap: 6, borderWidth: 1, borderColor: Colors.cardBorder },
   sysTagText: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
+});
+
+// ── AI Safety Guardian Styles ──────────────────
+const guardianStyles = StyleSheet.create({
+  guardianCard: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    backgroundColor: Colors.card, borderRadius: BorderRadius.xl,
+    borderWidth: 1, borderColor: Colors.primaryLight + '30',
+    padding: Spacing.md, ...Shadows.card,
+  },
+  guardianHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+  },
+  guardianHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  guardianIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  guardianTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  guardianPowered: { fontSize: 10, color: Colors.textMuted, marginTop: 1, fontWeight: '600', letterSpacing: 0.5 },
+  aiLiveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.backgroundSecondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  aiLiveDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
+  aiLiveText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  riskBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: 12, borderRadius: BorderRadius.lg,
+    borderWidth: 1, marginBottom: 12,
+  },
+  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  statusItem: { flex: 1, alignItems: 'center', gap: 4 },
+  statusLabel: { fontSize: 10, color: Colors.textMuted, fontWeight: '700', textTransform: 'uppercase' },
+  statusValue: { fontSize: 11, color: Colors.textPrimary, fontWeight: '700' },
+  statusDivider: { width: 1, height: 30, backgroundColor: Colors.cardBorder },
+  recommendationBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.primaryLight + '10', padding: 10, borderRadius: BorderRadius.md, marginTop: 8,
+  },
+  recommendationText: { flex: 1, fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  warningBanner: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.sm,
+    backgroundColor: Colors.danger + '10', borderLeftWidth: 4,
+    borderRadius: BorderRadius.md, padding: 12,
+    flexDirection: 'row', alignItems: 'center',
+  },
 });

@@ -28,7 +28,7 @@ class LocationData(BaseModel):
 
 
 class SOSAlertCreate(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     trigger_type: str  # "shake", "button", "voice", "hidden"
     location: LocationData
     message: Optional[str] = None

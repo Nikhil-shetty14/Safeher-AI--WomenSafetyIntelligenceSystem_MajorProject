@@ -65,6 +65,13 @@ print("\n" + "=" * 60)
 print("[WHISPER] Step 3: Testing Whisper Transcription...")
 print("=" * 60)
 
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+    print("  [OK] static_ffmpeg initialized")
+except Exception as e:
+    print(f"  [WARN] static_ffmpeg initialization: {e}")
+
 import whisper
 import torch
 

@@ -12,7 +12,6 @@ import { getSeverityColor } from '../constants/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
-import uuid from 'react-native-uuid';
 
 interface Message {
   id: string;
@@ -65,8 +64,13 @@ export default function ChatScreen() {
         const { status } = await Location.requestForegroundPermissionsAsync();
         let loc = null;
         if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          loc = pos.coords;
+          let pos;
+          try {
+            pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          } catch {
+            pos = await Location.getLastKnownPositionAsync();
+          }
+          loc = pos?.coords || null;
         }
         await sosAPI.trigger({
           user_id: user?.id,
@@ -115,7 +119,7 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
-    const dangerColor = item.danger_level ? getSeverityColor(item.danger_level) : null;
+    const dangerColor = item.danger_level ? getSeverityColor(item.danger_level) : undefined;
     return (
       <View style={[styles.msgRow, isUser && styles.msgRowUser]}>
         {!isUser && (
@@ -128,7 +132,7 @@ export default function ChatScreen() {
           isUser ? styles.bubbleUser : styles.bubbleAI,
           dangerColor && !isUser && { borderLeftColor: dangerColor, borderLeftWidth: 3 },
         ]}>
-          {item.danger_level && item.danger_level !== 'safe' && !isUser && (
+          {item.danger_level && item.danger_level !== 'safe' && !isUser && dangerColor && (
             <View style={[styles.dangerTag, { backgroundColor: dangerColor + '25' }]}>
               <Ionicons name="warning" size={12} color={dangerColor} />
               <Text style={[styles.dangerTagText, { color: dangerColor }]}>

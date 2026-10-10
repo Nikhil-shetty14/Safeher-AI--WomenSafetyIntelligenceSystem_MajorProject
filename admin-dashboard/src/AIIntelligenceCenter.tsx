@@ -1,474 +1,591 @@
-import React, { useEffect, useState, useRef } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
-  BrainCircuit, ShieldAlert, Zap, TrendingUp, AlertTriangle, ShieldCheck,
-  Download, Activity, Mic, Users, Map as MapIcon, Database, CheckCircle,
-  Crosshair, Server, FileText, RefreshCw, Wifi, WifiOff
+  BrainCircuit, Zap, AlertTriangle, ShieldCheck,
+  Download, Activity, Mic, Map as MapIcon,
+  Crosshair, Server, RefreshCw, Wifi, WifiOff,
+  ChevronDown, ChevronRight, Clock, Shield, BarChart as BarChartIcon
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-import "./index.css";
+import { GoogleMap, useJsApiLoader, Circle } from '@react-google-maps/api';
+import { useSocket } from "./SocketContext";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || API_BASE;
 
-/* ───────────────────────── Skeleton Loader ───────────────────────── */
-const Skeleton = ({ className = "", h = "h-4" }: { className?: string; h?: string }) => (
-  <div className={`${h} rounded bg-slate-800 animate-pulse ${className}`} />
+/* ─── Status Colors ─── */
+const STATUS_COLORS = {
+  CRITICAL: { bg: "#fef2f2", border: "#fca5a5", text: "#dc2626", dot: "#ef4444" },
+  HIGH:     { bg: "#fff7ed", border: "#fdba74", text: "#ea580c", dot: "#f97316" },
+  MEDIUM:   { bg: "#fefce8", border: "#fde047", text: "#ca8a04", dot: "#eab308" },
+  LOW:      { bg: "#f0fdf4", border: "#86efac", text: "#16a34a", dot: "#22c55e" },
+  ELEVATED: { bg: "#fff7ed", border: "#fdba74", text: "#ea580c", dot: "#f97316" },
+  NORMAL:   { bg: "#f0fdf4", border: "#86efac", text: "#16a34a", dot: "#22c55e" },
+} as Record<string, { bg: string; border: string; text: string; dot: string }>;
+
+const getStatusColor = (level: string) =>
+  STATUS_COLORS[level?.toUpperCase()] || STATUS_COLORS.LOW;
+
+const getMarkerColor = (risk: string): string => {
+  if (risk === "CRITICAL") return "#ef4444";
+  if (risk === "HIGH") return "#f97316";
+  if (risk === "MEDIUM") return "#eab308";
+  return "#22c55e";
+};
+
+/* ─── Simple Skeleton ─── */
+const Skeleton = ({ w = "100%", h = 16 }: { w?: string; h?: number }) => (
+  <div
+    style={{
+      width: w, height: h, borderRadius: 8,
+      background: "linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%)",
+      backgroundSize: "200% 100%",
+      animation: "shimmer 1.5s infinite",
+    }}
+  />
 );
 
-const CardSkeleton = () => (
-  <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-5 space-y-4">
-    <Skeleton h="h-3" className="w-1/3" />
-    <Skeleton h="h-8" className="w-1/2" />
-    <Skeleton h="h-2" className="w-2/3" />
-  </div>
-);
-
-/* ───────────────────────── Recharts Tooltip ───────────────────────── */
+/* ─── Recharts Custom Tooltip ─── */
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 shadow-xl">
-      <p className="text-xs text-slate-400 font-bold">{label}</p>
-      <p className="text-sm font-black text-cyan-400">{payload[0].value} predicted</p>
+    <div style={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: "8px 12px" }}>
+      <p style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, margin: 0 }}>{label}</p>
+      <p style={{ color: "#38bdf8", fontSize: 14, fontWeight: 700, margin: "2px 0 0" }}>{payload[0].value} predicted</p>
     </div>
   );
 };
 
-/* ───────────────────────── Main Component ───────────────────────── */
-export default function AIIntelligenceCenter() {
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<any>(null);
-  const [socketConnected, setSocketConnected] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
+/* ─── Card Component ─── */
+const Card = ({
+  children, style, className = "", noPadding = false
+}: {
+  children: React.ReactNode; style?: React.CSSProperties; className?: string; noPadding?: boolean;
+}) => (
+  <div
+    className={className}
+    style={{
+      background: "#0f172a",
+      border: "1px solid #1e293b",
+      borderRadius: 16,
+      padding: noPadding ? 0 : 24,
+      ...style,
+    }}
+  >
+    {children}
+  </div>
+);
 
-  const fetchStats = async () => {
+const CardHeader = ({
+  icon: Icon, iconColor, title, right
+}: {
+  icon: any; iconColor: string; title: string; right?: React.ReactNode;
+}) => (
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <Icon size={18} style={{ color: iconColor }} />
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", margin: 0, letterSpacing: 0.3 }}>{title}</h3>
+    </div>
+    {right}
+  </div>
+);
+
+/* ─── Tab Component ─── */
+const TabBar = ({
+  tabs, active, onChange
+}: {
+  tabs: string[]; active: string; onChange: (t: string) => void;
+}) => (
+  <div style={{ display: "flex", gap: 4, background: "#1e293b", borderRadius: 10, padding: 3 }}>
+    {tabs.map(t => (
+      <button
+        key={t}
+        onClick={() => onChange(t)}
+        style={{
+          padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+          fontSize: 12, fontWeight: 600, transition: "all 0.2s",
+          background: active === t ? "#334155" : "transparent",
+          color: active === t ? "#f1f5f9" : "#64748b",
+        }}
+      >
+        {t}
+      </button>
+    ))}
+  </div>
+);
+
+/* ─── Accordion ─── */
+const Accordion = ({
+  title, defaultOpen = false, children
+}: {
+  title: string; defaultOpen?: boolean; children: React.ReactNode;
+}) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ borderTop: "1px solid #1e293b" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "12px 0", background: "none", border: "none", cursor: "pointer", color: "#cbd5e1",
+          fontSize: 13, fontWeight: 600,
+        }}
+      >
+        {title}
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </button>
+      {open && <div style={{ paddingBottom: 12 }}>{children}</div>}
+    </div>
+  );
+};
+
+/* ═══════════════════════ MAIN COMPONENT ═══════════════════════ */
+function AIIntelligenceCenterContent() {
+  const libraries: any = ['visualization'];
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
+    libraries
+  });
+
+  const getCachedStats = () => {
+    try {
+      const cached = localStorage.getItem("ai_intel_stats_cache");
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return null;
+  };
+
+  const initialStats = getCachedStats();
+  const [loading, setLoading] = useState(!initialStats);
+  const [stats, setStats] = useState<any>(initialStats);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(initialStats ? new Date() : null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [bottomTab, setBottomTab] = useState("Voice");
+  const { socket, connected: socketConnected } = useSocket();
+
+  const fetchStats = useCallback(async () => {
     try {
       setRefreshing(true);
+      setError(null);
       const token = localStorage.getItem("admin_token") || localStorage.getItem("token");
       const res = await fetch(`${API_BASE}/api/ai/dashboard-stats`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
       setStats(data);
+      try {
+        localStorage.setItem("ai_intel_stats_cache", JSON.stringify(data));
+      } catch (e) {}
       setLastUpdated(new Date());
-    } catch (err) {
-      console.error("Failed to load AI stats:", err);
+    } catch (err: any) {
+      console.error("AI Intelligence fetch error:", err);
+      if (!stats) {
+        setError(err.message || "Failed to load AI intelligence data");
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [stats]);
 
-  /* ── Initial fetch + Socket.IO ── */
   useEffect(() => {
     fetchStats();
+    const interval = setInterval(fetchStats, 45000);
 
-    const socket = io(SOCKET_URL, {
-      path: "/socket.io",
-      transports: ["polling", "websocket"],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 3000,
-    });
-
-    socket.on("connect", () => {
-      setSocketConnected(true);
-      const token = localStorage.getItem("token");
-      // Register as admin so we get broadcasts
-      socket.emit("register_user", {
-        user_id: "dashboard-admin",
-        role: localStorage.getItem("admin_role") || "admin",
-      });
-    });
-
-    socket.on("disconnect", () => setSocketConnected(false));
-
-    // Live event handlers — refetch on any critical event
-    socket.on("new_sos_alert", () => fetchStats());
-    socket.on("tactical_intel_update", () => fetchStats());
-    socket.on("new_complaint", () => fetchStats());
-
-    socketRef.current = socket;
+    if (socket) {
+      socket.on("new_sos_alert", fetchStats);
+      socket.on("tactical_intel_update", fetchStats);
+    }
 
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      clearInterval(interval);
+      if (socket) {
+        socket.off("new_sos_alert", fetchStats);
+        socket.off("tactical_intel_update", fetchStats);
+      }
     };
-  }, []);
+  }, [fetchStats, socket]);
 
-  /* ── Risk Color Helpers ── */
-  const getRiskColor = (risk: string) => {
-    if (risk === "CRITICAL") return "text-red-500 bg-red-500/10 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.3)]";
-    if (risk === "HIGH") return "text-orange-500 bg-orange-500/10 border-orange-500/30";
-    if (risk === "MEDIUM") return "text-amber-500 bg-amber-500/10 border-amber-500/30";
-    return "text-emerald-500 bg-emerald-500/10 border-emerald-500/30";
-  };
-
-  const getMarkerColor = (risk: string): string => {
-    if (risk === "CRITICAL") return "#ef4444";
-    if (risk === "HIGH") return "#f97316";
-    if (risk === "MEDIUM") return "#f59e0b";
-    return "#10b981";
-  };
-
-  const getThreatBadge = (level: string) => {
-    const colors: Record<string, string> = {
-      CRITICAL: "bg-red-500/20 text-red-400 border-red-500/40 shadow-[0_0_12px_rgba(239,68,68,0.3)]",
-      ELEVATED: "bg-amber-500/20 text-amber-400 border-amber-500/40",
-      NORMAL: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40",
-    };
-    return colors[level] || colors.NORMAL;
-  };
-
-  /* ── Loading State ── */
+  /* ── Loading ── */
   if (loading) {
     return (
-      <div className="h-full bg-[#050811] text-slate-200 overflow-y-auto custom-scrollbar">
-        <div className="border-b border-indigo-900/40 bg-[#070b17] px-6 py-4 sticky top-0 z-20 flex justify-between items-center shadow-2xl">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-500/10 rounded-lg border border-indigo-500/30 flex items-center justify-center">
-              <BrainCircuit className="text-indigo-400 animate-pulse" size={26} />
-            </div>
-            <div>
-              <Skeleton h="h-6" className="w-64 mb-2" />
-              <Skeleton h="h-3" className="w-40" />
-            </div>
-          </div>
+      <div style={{ height: "100%", background: "#020617", padding: 32, overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 32 }}>
+          <BrainCircuit size={28} style={{ color: "#8b5cf6" }} />
+          <Skeleton w="240px" h={28} />
         </div>
-        <div className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => <CardSkeleton key={i} />)}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-slate-900/60 border border-slate-800 rounded-lg p-5 space-y-4">
-                <Skeleton h="h-3" className="w-1/3" />
-                <Skeleton h="h-32" />
-                <Skeleton h="h-4" className="w-full" />
-                <Skeleton h="h-4" className="w-3/4" />
-              </div>
-            ))}
-          </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} style={{ background: "#0f172a", borderRadius: 16, padding: 24, border: "1px solid #1e293b" }}>
+              <Skeleton w="60%" h={12} />
+              <div style={{ marginTop: 16 }}><Skeleton w="40%" h={28} /></div>
+            </div>
+          ))}
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {[1, 2].map(i => (
+            <div key={i} style={{ background: "#0f172a", borderRadius: 16, padding: 24, border: "1px solid #1e293b", minHeight: 300 }}>
+              <Skeleton w="50%" h={14} />
+              <div style={{ marginTop: 24 }}><Skeleton h={200} /></div>
+            </div>
+          ))}
+        </div>
+        <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
       </div>
     );
   }
 
+  const threatColor = getStatusColor(stats?.global_threat_level || "NORMAL");
+
   return (
-    <div className="h-full bg-[#050811] text-slate-200 overflow-y-auto custom-scrollbar">
-      {/* ══════════════════════ TOP HEADER ══════════════════════ */}
-      <div className="border-b border-indigo-900/40 bg-[#070b17] px-6 py-4 sticky top-0 z-20 flex justify-between items-center shadow-2xl">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-indigo-500/10 rounded-lg border border-indigo-500/30 flex items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-indigo-500/20 blur-md"></div>
-            <BrainCircuit className="text-indigo-400 relative z-10" size={26} />
+    <div style={{ height: "100%", background: "#020617", overflowY: "auto", color: "#e2e8f0" }}>
+      <style>{`
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .aic-main-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; margin-bottom: 24px; }
+        .aic-bottom-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-bottom: 32px; }
+        @media (max-width: 1024px) {
+          .aic-main-grid { grid-template-columns: 1fr !important; }
+          .aic-bottom-grid { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+
+      {/* ════════════ HEADER ════════════ */}
+      <div style={{
+        padding: "20px 32px",
+        borderBottom: "1px solid #1e293b",
+        background: "#0f172a",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        position: "sticky", top: 0, zIndex: 20,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: 12,
+            background: "rgba(139, 92, 246, 0.1)", border: "1px solid rgba(139, 92, 246, 0.25)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <BrainCircuit size={22} style={{ color: "#a78bfa" }} />
           </div>
           <div>
-            <h1 className="text-2xl font-black text-white tracking-wide">STATE COMMAND CENTER</h1>
-            <p className="text-indigo-400 mt-0.5 text-xs font-bold tracking-widest uppercase">
-              Ollama Phi3:Mini • Real-Time Telemetry
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#f8fafc", margin: 0 }}>AI Intelligence Center</h1>
+            <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0", fontWeight: 500 }}>
+              Powered by Ollama Phi-3 · Real-Time Threat Analysis
             </p>
           </div>
         </div>
-        <div className="flex gap-3 items-center">
-          {/* Socket Status */}
-          <div className="px-3 py-2 bg-slate-900/80 border border-slate-700/50 rounded-lg flex items-center gap-2">
-            {socketConnected ? (
-              <><Wifi size={14} className="text-emerald-400" /><span className="text-emerald-400 font-bold text-xs">LIVE</span></>
-            ) : (
-              <><WifiOff size={14} className="text-red-400" /><span className="text-red-400 font-bold text-xs">OFFLINE</span></>
-            )}
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "6px 12px", borderRadius: 8,
+            background: socketConnected ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)",
+            border: `1px solid ${socketConnected ? "rgba(34, 197, 94, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
+          }}>
+            {socketConnected
+              ? <><Wifi size={13} style={{ color: "#22c55e" }} /><span style={{ fontSize: 11, fontWeight: 700, color: "#22c55e" }}>LIVE</span></>
+              : <><WifiOff size={13} style={{ color: "#ef4444" }} /><span style={{ fontSize: 11, fontWeight: 700, color: "#ef4444" }}>OFFLINE</span></>
+            }
           </div>
-          {/* Last Updated */}
           {lastUpdated && (
-            <div className="px-3 py-2 bg-slate-900/80 border border-slate-700/50 rounded-lg">
-              <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                Updated: {lastUpdated.toLocaleTimeString()}
-              </span>
-            </div>
+            <span style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>
+              <Clock size={11} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+              {lastUpdated.toLocaleTimeString()}
+            </span>
           )}
-          {/* Refresh */}
           <button
             onClick={fetchStats}
             disabled={refreshing}
-            className="px-3 py-2 bg-slate-900/80 border border-slate-700/50 rounded-lg hover:border-indigo-500/40 transition-colors"
+            style={{
+              padding: "7px 10px", borderRadius: 8, border: "1px solid #334155",
+              background: "#1e293b", cursor: "pointer", display: "flex", alignItems: "center",
+            }}
           >
-            <RefreshCw size={16} className={`text-slate-300 ${refreshing ? "animate-spin" : ""}`} />
+            <RefreshCw size={15} style={{ color: "#94a3b8", animation: refreshing ? "spin 1s linear infinite" : "none" }} />
           </button>
-          {/* Export */}
-          <button className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center gap-2 font-bold text-sm transition-colors shadow-[0_0_15px_rgba(79,70,229,0.4)]">
-            <Download size={16} /> EXECUTIVE REPORT
+          <button style={{
+            padding: "8px 18px", borderRadius: 8,
+            background: "#7c3aed", color: "#fff", border: "none",
+            fontSize: 13, fontWeight: 600, cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <Download size={14} /> Export
           </button>
         </div>
       </div>
 
-      <div className="p-6 w-full mx-auto space-y-6">
+      <div style={{ padding: "24px 32px", maxWidth: 1600, margin: "0 auto" }}>
 
-        {/* ══════════════════════ TOP KPIs ══════════════════════ */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Global Threat */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-2xl"></div>
-            <div className="flex justify-between items-start">
-              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">Global Threat</span>
-              <AlertTriangle className="text-red-500" size={20} />
-            </div>
-            <div className="mt-4">
-              <div className={`inline-block px-3 py-1 rounded-lg text-lg font-black border ${getThreatBadge(stats?.global_threat_level)}`}>
-                {stats?.global_threat_level || "—"}
-              </div>
-            </div>
+        {/* Error Banner */}
+        {error && (
+          <div style={{
+            padding: "12px 20px", borderRadius: 12, marginBottom: 20,
+            background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.2)",
+            color: "#fca5a5", fontSize: 13, display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <AlertTriangle size={16} /> {error}
+            <button onClick={fetchStats} style={{ marginLeft: "auto", background: "none", border: "none", color: "#fca5a5", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Retry</button>
           </div>
+        )}
+
+        {/* ════════════ ROW 1: TOP KPIs ════════════ */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
+
+          {/* Global Threat */}
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>Global Threat</span>
+              <AlertTriangle size={18} style={{ color: threatColor.dot }} />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <span style={{
+                display: "inline-block", padding: "6px 16px", borderRadius: 10,
+                fontSize: 16, fontWeight: 800,
+                background: `${threatColor.dot}18`, color: threatColor.dot,
+                border: `1px solid ${threatColor.dot}40`,
+              }}>
+                {stats?.global_threat_level || "—"}
+              </span>
+            </div>
+          </Card>
 
           {/* Avg Risk Score */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl"></div>
-            <div className="flex justify-between items-start">
-              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">Avg Risk Score</span>
-              <Zap className="text-amber-500" size={20} />
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>Risk Score</span>
+              <Zap size={18} style={{ color: "#f59e0b" }} />
             </div>
-            <div className="mt-4">
-              <div className="flex items-end gap-1">
-                <h2 className="text-3xl font-black text-white">{stats?.average_risk_score ?? 0}</h2>
-                <span className="text-slate-500 font-bold mb-1">/100</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000"
-                  style={{
-                    width: `${stats?.average_risk_score ?? 0}%`,
-                    background: (stats?.average_risk_score ?? 0) > 70 ? "#ef4444" : (stats?.average_risk_score ?? 0) > 40 ? "#f59e0b" : "#10b981",
-                  }}
-                />
-              </div>
+            <div style={{ marginTop: 12, display: "flex", alignItems: "baseline", gap: 4 }}>
+              <span style={{ fontSize: 32, fontWeight: 800, color: "#f8fafc" }}>{stats?.average_risk_score ?? 0}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#475569" }}>/100</span>
             </div>
-          </div>
+            <div style={{ marginTop: 10, height: 6, background: "#1e293b", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{
+                height: "100%", borderRadius: 99, transition: "width 1s ease",
+                width: `${stats?.average_risk_score ?? 0}%`,
+                background: (stats?.average_risk_score ?? 0) > 70 ? "#ef4444" : (stats?.average_risk_score ?? 0) > 40 ? "#f59e0b" : "#22c55e",
+              }} />
+            </div>
+          </Card>
 
           {/* AI Confidence */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl"></div>
-            <div className="flex justify-between items-start">
-              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">AI Confidence</span>
-              <ShieldCheck className="text-emerald-500" size={20} />
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>AI Confidence</span>
+              <ShieldCheck size={18} style={{ color: "#22c55e" }} />
             </div>
-            <div className="mt-4">
-              <div className="flex items-end gap-1">
-                <h2 className="text-3xl font-black text-white">{stats?.ai_confidence_index ?? 0}</h2>
-                <span className="text-emerald-500 font-bold mb-1">%</span>
-              </div>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Analysis Certainty</p>
+            <div style={{ marginTop: 12, display: "flex", alignItems: "baseline", gap: 4 }}>
+              <span style={{ fontSize: 32, fontWeight: 800, color: "#f8fafc" }}>{stats?.ai_confidence_index ?? 0}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#22c55e" }}>%</span>
             </div>
-          </div>
+            <p style={{ marginTop: 8, fontSize: 11, color: "#64748b", fontWeight: 500 }}>Analysis certainty index</p>
+          </Card>
 
-          {/* Active Units */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl"></div>
-            <div className="flex justify-between items-start">
-              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">Active Units</span>
-              <Users className="text-blue-500" size={20} />
+          {/* AI Engine */}
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>AI Engine</span>
+              <Server size={18} style={{ color: "#8b5cf6" }} />
             </div>
-            <div className="mt-4">
-              <div className="flex items-end gap-2">
-                <h2 className="text-3xl font-black text-white">{stats?.resource_allocation?.length || 0}</h2>
-                <span className="text-blue-400 font-bold mb-1 text-sm">Deployed</span>
+            <div style={{ marginTop: 12 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "#c4b5fd" }}>
+                {stats?.model_monitoring?.model_name ?? "—"}
+              </span>
+            </div>
+            <div style={{ marginTop: 8, display: "flex", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Latency</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#f8fafc" }}>{stats?.model_monitoring?.latency_ms ?? "—"} ms</div>
               </div>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Emergency Response</p>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Uptime</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#22c55e" }}>{stats?.model_monitoring?.uptime ?? "—"}</div>
+              </div>
             </div>
-          </div>
+          </Card>
         </div>
 
-        {/* ══════════════════════ 3-COLUMN GRID ══════════════════════ */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* ════════════ ROW 2: MAIN — SOS + HEATMAP (large) ════════════ */}
+        <div className="aic-main-grid">
 
-          {/* ── LEFT COLUMN ── */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-
-            {/* Live SOS Analysis */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg overflow-hidden">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest flex items-center gap-2">
-                  <Activity size={16} className="text-red-500" /> Live SOS Analysis
-                </h3>
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+          {/* Live SOS AI Analysis — large card */}
+          <Card noPadding style={{ display: "flex", flexDirection: "column", minHeight: 440 }}>
+            <div style={{
+              padding: "16px 20px", borderBottom: "1px solid #1e293b",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Activity size={16} style={{ color: "#ef4444" }} />
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", margin: 0 }}>Live SOS AI Analysis</h3>
               </div>
-              <div className="p-4 flex-1 space-y-4 max-h-[320px] overflow-y-auto custom-scrollbar">
-                {stats?.live_sos_analysis?.length > 0 ? stats.live_sos_analysis.map((sos: any, i: number) => (
-                  <div key={i} className="bg-slate-800/40 border border-slate-700/50 p-3 rounded-lg">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-indigo-400">SOS-{sos.id}</span>
-                      <span className="text-[10px] text-slate-400 font-bold">{sos.time}</span>
+              <span style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: "#ef4444",
+                boxShadow: "0 0 8px rgba(239,68,68,0.6)",
+                animation: (stats?.live_sos_analysis?.length > 0) ? "pulse-dot 2s infinite" : "none",
+              }} />
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+              {stats?.live_sos_analysis?.length > 0 ? stats.live_sos_analysis.map((sos: any, i: number) => {
+                const riskColor = sos.risk > 75 ? "#ef4444" : sos.risk > 50 ? "#f59e0b" : "#22c55e";
+                return (
+                  <div key={i} style={{
+                    padding: 14, borderRadius: 12, marginBottom: 12,
+                    background: "#1e293b", border: "1px solid #334155",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#8b5cf6" }}>SOS-{sos.id}</span>
+                      <span style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>{sos.time}</span>
                     </div>
-                    <p className="text-sm text-slate-300 leading-relaxed mb-3">{sos.tactical_summary}</p>
+                    <p style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5, margin: "0 0 10px" }}>{sos.tactical_summary}</p>
                     {sos.source === 'voice' && sos.audio_url && (
-                      <audio controls className="w-full mt-2" src={sos.audio_url} />
+                      <audio controls style={{ width: "100%", marginTop: 4 }} src={sos.audio_url} />
                     )}
-                    <div className="flex justify-between items-center bg-slate-900/80 p-2 rounded border border-slate-800">
-                      <span className="text-[10px] uppercase font-bold text-slate-500">Risk Score</span>
-                      <span className={`text-sm font-black ${sos.risk > 75 ? "text-red-400" : sos.risk > 50 ? "text-amber-400" : "text-emerald-400"}`}>{sos.risk}/100</span>
+                    <div style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "8px 12px", borderRadius: 8, background: "#0f172a",
+                    }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#64748b", textTransform: "uppercase" }}>Risk Score</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: riskColor }}>{sos.risk}/100</span>
                     </div>
                   </div>
-                )) : (
-                  <div className="text-center py-8">
-                    <ShieldCheck size={32} className="text-emerald-500/40 mx-auto mb-2" />
-                    <p className="text-sm text-slate-500 font-medium">No active SOS alerts</p>
-                    <p className="text-xs text-slate-600 mt-1">All clear in your jurisdiction</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Voice Stress Analysis */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <Mic size={16} className="text-amber-500" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Voice Stress Matrix</h3>
-              </div>
-              <div className="p-4 grid grid-cols-2 gap-3">
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 text-center">
-                  <div className="text-2xl font-black text-amber-500">{stats?.voice_analysis?.stress_markers_detected ?? 0}</div>
-                  <div className="text-[9px] uppercase font-bold text-slate-400 mt-1">Stress Markers</div>
+                );
+              }) : (
+                <div style={{ textAlign: "center", padding: "48px 0" }}>
+                  <ShieldCheck size={36} style={{ color: "#22c55e", opacity: 0.4, margin: "0 auto 12px" }} />
+                  <p style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>No active SOS alerts</p>
+                  <p style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>All clear in your jurisdiction</p>
                 </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 text-center">
-                  <div className="text-lg font-black text-rose-500 mt-1">{stats?.voice_analysis?.primary_emotion ?? "—"}</div>
-                  <div className="text-[9px] uppercase font-bold text-slate-400 mt-1">Primary Emotion</div>
-                </div>
-                <div className="col-span-2 bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-lg flex justify-between items-center">
-                  <span className="text-[10px] uppercase font-bold text-indigo-400">AI Audio Accuracy</span>
-                  <span className="text-sm font-black text-indigo-300">{stats?.voice_analysis?.accuracy ?? "—"}</span>
-                </div>
-              </div>
+              )}
             </div>
+          </Card>
 
-            {/* Complaint Intelligence */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <FileText size={16} className="text-emerald-500" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Complaint Intel</h3>
+          {/* AI Risk Heatmap — large card */}
+          <Card noPadding style={{ display: "flex", flexDirection: "column", minHeight: 440 }}>
+            <div style={{
+              padding: "16px 20px", borderBottom: "1px solid #1e293b",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <MapIcon size={16} style={{ color: "#ef4444" }} />
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", margin: 0 }}>AI Risk Heatmap</h3>
               </div>
-              <div className="p-4 space-y-3">
-                {[
-                  { label: "Processed Today", value: stats?.complaint_intelligence?.total_processed ?? 0, color: "text-white" },
-                  { label: "Current Sentiment", value: stats?.complaint_intelligence?.sentiment ?? "—", color: "text-red-400", isBadge: true },
-                  { label: "Top Keyword", value: stats?.complaint_intelligence?.top_keyword ?? "—", color: "text-indigo-400" },
-                  { label: "Critical Unresolved", value: stats?.complaint_intelligence?.unresolved_critical ?? 0, color: "text-red-500", isLast: true },
-                ].map((item, i) => (
-                  <div key={i} className={`flex justify-between items-center p-2 ${!item.isLast ? "border-b border-slate-800/50" : ""}`}>
-                    <span className="text-xs text-slate-400">{item.label}</span>
-                    {item.isBadge ? (
-                      <span className={`text-xs font-bold ${item.color} px-2 py-1 bg-red-500/10 rounded`}>{item.value}</span>
-                    ) : (
-                      <span className={`text-sm font-bold ${item.color}`}>{item.value}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* ── CENTER COLUMN ── */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-
-            {/* Karnataka District Risk Heatmap */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg overflow-hidden">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <MapIcon size={16} className="text-rose-500" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Risk Heatmap — Karnataka</h3>
-              </div>
-              <div style={{ height: 350 }}>
-                <MapContainer
-                  center={[12.9716, 77.5946]}
-                  zoom={11}
-                  scrollWheelZoom={true}
-                  style={{ height: "100%", width: "100%", background: "#0a0f1c" }}
-                  attributionControl={false}
-                >
-                  <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-                  {stats?.active_hotspots?.map((spot: any, i: number) => (
-                    <CircleMarker
-                      key={i}
-                      center={[spot.coords[0], spot.coords[1]]}
-                      radius={spot.risk === "CRITICAL" ? 18 : spot.risk === "HIGH" ? 14 : 10}
-                      pathOptions={{
-                        color: getMarkerColor(spot.risk),
-                        fillColor: getMarkerColor(spot.risk),
-                        fillOpacity: 0.45,
-                        weight: 2,
-                      }}
-                    >
-                      <Popup>
-                        <div className="text-xs">
-                          <strong>{spot.name}</strong><br />
-                          Risk: <span style={{ color: getMarkerColor(spot.risk) }}>{spot.risk}</span><br />
-                          Type: {spot.type}
-                        </div>
-                      </Popup>
-                    </CircleMarker>
-                  ))}
-                </MapContainer>
-              </div>
-              {/* Legend */}
-              <div className="p-3 border-t border-slate-800 flex justify-center gap-4">
+              <div style={{ display: "flex", gap: 12 }}>
                 {[
                   { label: "Critical", color: "#ef4444" },
                   { label: "High", color: "#f97316" },
-                  { label: "Medium", color: "#f59e0b" },
-                  { label: "Low", color: "#10b981" },
-                ].map((l) => (
-                  <div key={l.label} className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
-                    <span className="text-[10px] text-slate-400 font-bold">{l.label}</span>
+                  { label: "Medium", color: "#eab308" },
+                  { label: "Low", color: "#22c55e" },
+                ].map(l => (
+                  <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: l.color }} />
+                    <span style={{ fontSize: 10, color: "#64748b", fontWeight: 600 }}>{l.label}</span>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Tactical AI Recommendations */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <Crosshair size={16} className="text-indigo-400" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Tactical Recommendations</h3>
-              </div>
-              <div className="p-4 space-y-3">
-                {stats?.ai_recommendations?.length > 0 ? stats.ai_recommendations.map((rec: string, i: number) => (
-                  <div key={i} className="flex gap-3 items-start p-3 bg-indigo-500/5 rounded-lg border border-indigo-500/10">
-                    <div className="mt-1 flex-shrink-0">
-                      <CheckCircle size={14} className="text-indigo-400" />
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed font-medium">{rec}</p>
-                  </div>
-                )) : (
-                  <p className="text-xs text-slate-500 text-center py-4">No recommendations generated yet.</p>
-                )}
-              </div>
+            <div style={{ flex: 1, minHeight: 350 }}>
+              {isLoaded ? (
+                <GoogleMap
+                  mapContainerStyle={{ height: "100%", width: "100%", borderRadius: "0 0 16px 16px" }}
+                  center={{ lat: 12.9716, lng: 77.5946 }}
+                  zoom={11}
+                  options={{
+                    styles: [
+                      { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+                      { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+                      { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+                      { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+                      { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
+                      { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#263c3f" }] },
+                      { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6b9a76" }] },
+                      { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
+                      { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
+                      { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] },
+                      { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#746855" }] },
+                      { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#1f2835" }] },
+                      { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#f3d19c" }] },
+                      { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
+                      { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#515c6d" }] },
+                      { featureType: "water", elementType: "labels.text.stroke", stylers: [{ color: "#17263c" }] },
+                    ],
+                    disableDefaultUI: true,
+                  }}
+                >
+                  {stats?.active_hotspots?.map((spot: any, i: number) => (
+                    <Circle
+                      key={i}
+                      center={{ lat: spot.coords[0], lng: spot.coords[1] }}
+                      radius={spot.risk === "CRITICAL" ? 2000 : spot.risk === "HIGH" ? 1500 : 1000}
+                      options={{
+                        fillColor: getMarkerColor(spot.risk),
+                        fillOpacity: 0.4,
+                        strokeColor: getMarkerColor(spot.risk),
+                        strokeWeight: 2,
+                      }}
+                    />
+                  ))}
+                </GoogleMap>
+              ) : (
+                <div style={{ height: "100%", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b" }}>
+                  <RefreshCw size={24} style={{ animation: "spin 1s linear infinite", opacity: 0.5 }} />
+                </div>
+              )}
             </div>
+          </Card>
+        </div>
+
+        {/* ════════════ ROW 3: TABBED DETAIL SECTION ════════════ */}
+        <Card style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", margin: 0 }}>Intelligence Modules</h3>
+            <TabBar
+              tabs={["Voice", "Predictive", "Behaviour", "Resources"]}
+              active={bottomTab}
+              onChange={setBottomTab}
+            />
           </div>
 
-          {/* ── RIGHT COLUMN ── */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-
-            {/* Predictive Trends — Recharts */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <Database size={16} className="text-cyan-400" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Predictive Trends</h3>
+          {/* Voice Intelligence */}
+          {bottomTab === "Voice" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+              <div style={{ padding: 20, borderRadius: 12, background: "#1e293b", textAlign: "center" }}>
+                <Mic size={24} style={{ color: "#f59e0b", margin: "0 auto 8px" }} />
+                <div style={{ fontSize: 28, fontWeight: 800, color: "#f8fafc" }}>{stats?.voice_analysis?.stress_markers_detected ?? 0}</div>
+                <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginTop: 4, textTransform: "uppercase" }}>Stress Markers</div>
               </div>
-              <div className="p-4" style={{ height: 200 }}>
+              <div style={{ padding: 20, borderRadius: 12, background: "#1e293b", textAlign: "center" }}>
+                <Shield size={24} style={{ color: "#ef4444", margin: "0 auto 8px" }} />
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#fca5a5" }}>{stats?.voice_analysis?.primary_emotion ?? "—"}</div>
+                <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginTop: 4, textTransform: "uppercase" }}>Primary Emotion</div>
+              </div>
+              <div style={{ padding: 20, borderRadius: 12, background: "#1e293b", textAlign: "center" }}>
+                <BarChartIcon size={24} style={{ color: "#8b5cf6", margin: "0 auto 8px" }} />
+                <div style={{ fontSize: 28, fontWeight: 800, color: "#c4b5fd" }}>{stats?.voice_analysis?.accuracy ?? "—"}</div>
+                <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginTop: 4, textTransform: "uppercase" }}>AI Audio Accuracy</div>
+              </div>
+            </div>
+          )}
+
+          {/* Predictive Risk */}
+          {bottomTab === "Predictive" && (
+            <div>
+              <p style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Predicted incident volume over upcoming time windows (Ollama Phi-3 analysis)</p>
+              <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats?.predictive_analytics || []} barCategoryGap="20%">
-                    <XAxis dataKey="time" tick={{ fill: "#64748b", fontSize: 11, fontWeight: 700 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} width={28} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(99,102,241,0.08)" }} />
-                    <Bar dataKey="predicted_incidents" radius={[4, 4, 0, 0]}>
+                  <BarChart data={stats?.predictive_analytics || []} barCategoryGap="25%">
+                    <XAxis dataKey="time" tick={{ fill: "#64748b", fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} width={30} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(99,102,241,0.06)" }} />
+                    <Bar dataKey="predicted_incidents" radius={[6, 6, 0, 0]} barSize={36}>
                       {(stats?.predictive_analytics || []).map((_: any, index: number) => (
                         <Cell
                           key={index}
-                          fill={(stats?.predictive_analytics?.[index]?.predicted_incidents ?? 0) > 15 ? "#ef4444" : (stats?.predictive_analytics?.[index]?.predicted_incidents ?? 0) > 8 ? "#f59e0b" : "#22d3ee"}
+                          fill={
+                            (stats?.predictive_analytics?.[index]?.predicted_incidents ?? 0) > 15 ? "#ef4444" :
+                            (stats?.predictive_analytics?.[index]?.predicted_incidents ?? 0) > 8 ? "#f59e0b" : "#38bdf8"
+                          }
                         />
                       ))}
                     </Bar>
@@ -476,76 +593,187 @@ export default function AIIntelligenceCenter() {
                 </ResponsiveContainer>
               </div>
             </div>
+          )}
 
-            {/* Resource Allocation */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <ShieldAlert size={16} className="text-blue-500" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Resource Allocation</h3>
-              </div>
-              <div className="p-4 space-y-3">
-                {stats?.resource_allocation?.map((res: any, i: number) => (
-                  <div key={i} className="flex flex-col p-3 bg-slate-800/40 rounded-lg border border-slate-700/50">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm font-bold text-white">{res.unit}</span>
-                      <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
-                        res.status === "Deployed" ? "bg-blue-500/20 text-blue-400" :
-                        res.status === "Active Surveillance" ? "bg-indigo-500/20 text-indigo-400" :
-                        "bg-slate-500/20 text-slate-400"
-                      }`}>
-                        {res.status}
-                      </span>
+          {/* Behaviour Intelligence (Complaints) */}
+          {bottomTab === "Behaviour" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+              {[
+                { label: "Processed Today", value: stats?.complaint_intelligence?.total_processed ?? 0, color: "#f8fafc" },
+                { label: "Current Sentiment", value: stats?.complaint_intelligence?.sentiment ?? "—", color: stats?.complaint_intelligence?.sentiment === "Negative" ? "#ef4444" : "#f59e0b" },
+                { label: "Top Keyword", value: stats?.complaint_intelligence?.top_keyword ?? "—", color: "#8b5cf6" },
+                { label: "Critical Unresolved", value: stats?.complaint_intelligence?.unresolved_critical ?? 0, color: "#ef4444" },
+              ].map((item, i) => (
+                <div key={i} style={{ padding: 20, borderRadius: 12, background: "#1e293b" }}>
+                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>{item.label}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: item.color }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Emergency Resources */}
+          {bottomTab === "Resources" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              {stats?.resource_allocation?.map((res: any, i: number) => (
+                <div key={i} style={{
+                  padding: 16, borderRadius: 12, background: "#1e293b",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#f8fafc" }}>{res.unit}</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                      <MapIcon size={11} /> {res.location}
                     </div>
-                    <span className="text-xs text-slate-400 flex items-center gap-1">
-                      <MapIcon size={10} /> {res.location}
+                  </div>
+                  <span style={{
+                    padding: "4px 10px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+                    textTransform: "uppercase",
+                    background: res.status === "Deployed" ? "rgba(59,130,246,0.15)" : "rgba(100,116,139,0.15)",
+                    color: res.status === "Deployed" ? "#60a5fa" : "#94a3b8",
+                  }}>
+                    {res.status}
+                  </span>
+                </div>
+              )) || (
+                <p style={{ color: "#64748b", fontSize: 13 }}>No resource allocation data available.</p>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* ════════════ ROW 4: BOTTOM — Recommendations + Summary ════════════ */}
+        <div className="aic-bottom-grid">
+
+          {/* Tactical AI Recommendations */}
+          <Card>
+            <CardHeader icon={Crosshair} iconColor="#8b5cf6" title="Tactical AI Recommendations" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {stats?.ai_recommendations?.length > 0 ? stats.ai_recommendations.map((rec: string, i: number) => (
+                <div key={i} style={{
+                  display: "flex", gap: 10, alignItems: "flex-start",
+                  padding: "12px 14px", borderRadius: 10,
+                  background: "rgba(139, 92, 246, 0.06)", border: "1px solid rgba(139, 92, 246, 0.12)",
+                }}>
+                  <ShieldCheck size={14} style={{ color: "#a78bfa", marginTop: 2, flexShrink: 0 }} />
+                  <p style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5, margin: 0 }}>{rec}</p>
+                </div>
+              )) : (
+                <p style={{ fontSize: 13, color: "#475569", textAlign: "center", padding: "24px 0" }}>
+                  No recommendations generated yet. AI engine will analyze when new data arrives.
+                </p>
+              )}
+            </div>
+          </Card>
+
+          {/* AI Incident Summary */}
+          <Card>
+            <CardHeader icon={BarChartIcon} iconColor="#38bdf8" title="AI Incident Summary" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <Accordion title="Admin Performance" defaultOpen>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#1e293b", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Avg Response</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#f8fafc", marginTop: 4 }}>{stats?.admin_performance?.avg_response_time_sec ?? 0}s</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#1e293b", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Resolved</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#22c55e", marginTop: 4 }}>{stats?.admin_performance?.cases_resolved_today ?? 0}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#1e293b", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>AI Assisted</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#c4b5fd", marginTop: 4 }}>{stats?.admin_performance?.ai_assisted_resolutions ?? "—"}</div>
+                  </div>
+                </div>
+              </Accordion>
+
+              <Accordion title="Recent Insights">
+                {stats?.recent_insights?.length > 0 ? stats.recent_insights.map((insight: string, i: number) => (
+                  <p key={i} style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6, margin: "0 0 6px", paddingLeft: 12, borderLeft: "2px solid #334155" }}>
+                    {insight}
+                  </p>
+                )) : (
+                  <p style={{ fontSize: 12, color: "#475569" }}>No recent insights available.</p>
+                )}
+              </Accordion>
+
+              <Accordion title="Active Hotspots">
+                {stats?.active_hotspots?.length > 0 ? stats.active_hotspots.map((spot: any, i: number) => (
+                  <div key={i} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "8px 0", borderBottom: i < stats.active_hotspots.length - 1 ? "1px solid #1e293b" : "none",
+                  }}>
+                    <span style={{ fontSize: 12, color: "#cbd5e1" }}>{spot.name}</span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
+                      background: `${getMarkerColor(spot.risk)}18`, color: getMarkerColor(spot.risk),
+                    }}>
+                      {spot.risk}
                     </span>
                   </div>
-                ))}
-              </div>
+                )) : (
+                  <p style={{ fontSize: 12, color: "#475569" }}>No active hotspots detected.</p>
+                )}
+              </Accordion>
             </div>
-
-            {/* Ollama Node Status */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-4 border-b border-slate-800 flex items-center gap-2">
-                <Server size={16} className="text-emerald-500" />
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Ollama Node Status</h3>
-              </div>
-              <div className="p-4 grid grid-cols-2 gap-3">
-                {[
-                  { label: "Model", value: stats?.model_monitoring?.model_name ?? "—", color: "text-indigo-400" },
-                  { label: "Uptime", value: stats?.model_monitoring?.uptime ?? "—", color: "text-emerald-400" },
-                  { label: "Latency", value: `${stats?.model_monitoring?.latency_ms ?? "—"} ms`, color: "text-white" },
-                  { label: "Tokens", value: stats?.model_monitoring?.tokens_processed ?? "—", color: "text-white" },
-                ].map((m, i) => (
-                  <div key={i} className="flex flex-col p-2 bg-slate-800/40 rounded border border-slate-700/50">
-                    <span className="text-[9px] text-slate-500 font-bold uppercase">{m.label}</span>
-                    <span className={`text-sm font-bold ${m.color}`}>{m.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Admin Performance */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-lg flex flex-col shadow-lg">
-              <div className="bg-[#0a0f1c] p-3 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Admin Performance</h3>
-                <span className="text-xs font-black text-indigo-400">{stats?.admin_performance?.ai_assisted_resolutions ?? "—"} AI Assisted</span>
-              </div>
-              <div className="p-3 flex justify-between">
-                <div>
-                  <div className="text-[10px] text-slate-500 uppercase font-bold">Avg Response</div>
-                  <div className="text-sm font-bold text-white">{stats?.admin_performance?.avg_response_time_sec ?? 0} sec</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold">Resolved Today</div>
-                  <div className="text-sm font-bold text-white">{stats?.admin_performance?.cases_resolved_today ?? 0}</div>
-                </div>
-              </div>
-            </div>
-          </div>
+          </Card>
         </div>
 
       </div>
+
+      {/* Pulse animation */}
+      <style>{`
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(239,68,68,0.6); }
+          50% { opacity: 0.4; box-shadow: 0 0 16px rgba(239,68,68,0.8); }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
+  );
+}
+
+/* ═══════════════════════ ERROR BOUNDARY ═══════════════════════ */
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("AI Intelligence Center caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ height: "100%", background: "#020617", padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Card style={{ maxWidth: 500, textAlign: 'center' }}>
+            <AlertTriangle size={48} style={{ color: '#ef4444', margin: '0 auto 16px' }} />
+            <h2 style={{ color: '#f8fafc', fontSize: 20, marginBottom: 12 }}>Intelligence Module Offline</h2>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 24 }}>{this.state.error?.message || "An unexpected error occurred while loading the AI Intelligence Center."}</p>
+            <button onClick={() => window.location.reload()} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
+              Reload System
+            </button>
+          </Card>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function AIIntelligenceCenter() {
+  return (
+    <ErrorBoundary>
+      <AIIntelligenceCenterContent />
+    </ErrorBoundary>
   );
 }

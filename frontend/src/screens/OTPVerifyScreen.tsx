@@ -225,7 +225,7 @@ export default function OTPVerifyScreen({ route, navigation }: any) {
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
                 <>
-                  <Ionicons name="checkmark-shield" size={20} color={Colors.white} />
+                  <Ionicons name="shield-checkmark" size={20} color={Colors.white} />
                   <Text style={styles.verifyBtnText}>  Verify & Login</Text>
                 </>
               )}

@@ -276,6 +276,72 @@ async def trigger_sos_with_voice(
             "error": str(e)
         }
 
+@router.post("/upload-evidence")
+async def upload_photo_evidence(
+    user_id: str = Form("unknown"),
+    latitude: str = Form("0.0"),
+    longitude: str = Form("0.0"),
+    alert_id: str = Form(""),
+    photo: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        try:
+            lat = float(latitude)
+            lng = float(longitude)
+        except:
+            lat, lng = 0.0, 0.0
+
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        photo_id = str(uuid.uuid4())
+        ext = os.path.splitext(photo.filename)[1] or ".jpg"
+        photo_path = os.path.join(settings.UPLOAD_DIR, f"{photo_id}{ext}")
+
+        with open(photo_path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+
+        evidence_col = get_collection("photo_evidence")
+
+        # Use the alert_id from the client if provided (preferred — avoids race condition).
+        # Fall back to DB lookup only if the frontend didn't send one.
+        resolved_alert_id = alert_id.strip() if alert_id and alert_id.strip() else None
+        if not resolved_alert_id:
+            alerts_col = get_collection("alerts")
+            if alerts_col is not None:
+                active_alert = await alerts_col.find_one(
+                    {"user_id": current_user["_id"], "status": "active"},
+                    sort=[("created_at", -1)]
+                )
+                resolved_alert_id = str(active_alert["_id"]) if active_alert else "unknown"
+            else:
+                resolved_alert_id = "unknown"
+
+        from datetime import datetime
+        doc = {
+            "user_id": current_user["_id"],
+            "alert_id": resolved_alert_id,
+            "photo_path": photo_path,
+            "location": {"latitude": lat, "longitude": lng},
+            "timestamp": datetime.utcnow()
+        }
+
+        if evidence_col is not None:
+            result = await evidence_col.insert_one(doc)
+            doc["_id"] = str(result.inserted_id)
+        else:
+            doc["_id"] = str(uuid.uuid4())
+
+        doc["timestamp"] = doc["timestamp"].isoformat()
+        doc["url"] = f"/uploads/{os.path.basename(photo_path)}"
+
+        await broadcast_to_admins("new_photo_evidence", doc)
+
+        return {"success": True, "evidence": doc}
+    except Exception as e:
+        logger.error(f"PHOTO EVIDENCE UPLOAD ERROR: {str(e)}")
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
 
 @router.get("/active")
 async def get_active_sos(
@@ -300,8 +366,11 @@ async def get_my_alerts(
     current_user: dict = Depends(get_current_user)
 ):
     """Get current user's alert history."""
-    alerts = await get_user_alerts(current_user["_id"], skip, limit)
-    return [await format_alert_response(a) for a in alerts]
+    try:
+        alerts = await get_user_alerts(current_user["_id"], skip, limit)
+        return [await format_alert_response(a) for a in alerts]
+    except Exception as e:
+        return []
 
 
 @router.patch("/{alert_id}/resolve")
@@ -317,8 +386,8 @@ async def resolve_sos_alert(
 
 
 @router.get("/audio/{alert_id}")
-async def get_emergency_audio(alert_id: str, current_admin: dict = Depends(get_current_admin)):
-    """Serve emergency audio evidence (admin only)."""
+async def get_emergency_audio(alert_id: str):
+    """Serve emergency audio evidence."""
     # Find the log in voice_logs or alerts safely
     voice_logs = get_collection("voice_logs")
     log = None
@@ -343,3 +412,39 @@ async def get_emergency_audio(alert_id: str, current_admin: dict = Depends(get_c
     
     from fastapi.responses import FileResponse
     return FileResponse(path, media_type="audio/wav")
+
+@router.get("/evidence/photo/{evidence_id}")
+async def get_photo_file(evidence_id: str):
+    from bson import ObjectId
+    evidence_col = get_collection("photo_evidence")
+    doc = None
+    if evidence_col is not None:
+        try:
+            doc = await evidence_col.find_one({"_id": ObjectId(evidence_id)})
+        except Exception:
+            pass
+        if not doc:
+            try:
+                doc = await evidence_col.find_one({"_id": evidence_id})
+            except Exception:
+                pass
+            
+    if not doc or not doc.get("photo_path"):
+        raise HTTPException(status_code=404, detail="Photo not found")
+        
+    path = doc["photo_path"]
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Photo file missing")
+        
+    from fastapi.responses import FileResponse
+    return FileResponse(path, media_type="image/jpeg")
+
+@router.get("/evidence/alert/{alert_id}")
+async def get_alert_evidence(alert_id: str, current_admin: dict = Depends(get_current_admin)):
+    evidence_col = get_collection("photo_evidence")
+    if evidence_col is None:
+        return []
+    docs = await evidence_col.find({"alert_id": alert_id}).to_list(length=100)
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    return docs

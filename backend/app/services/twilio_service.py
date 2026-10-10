@@ -160,32 +160,37 @@ async def send_otp(phone: str) -> dict:
     if client and settings.TWILIO_VERIFY_SERVICE_SID:
         try:
             verifications = client.verify.v2.services(settings.TWILIO_VERIFY_SERVICE_SID).verifications
-            verification = await asyncio.to_thread(
-                verifications.create,
-                to=formatted_phone,
-                channel="sms"
+            verification = await asyncio.wait_for(
+                asyncio.to_thread(verifications.create, to=formatted_phone, channel="sms"),
+                timeout=3.5
             )
             logger.info(f"OTP sent via Twilio Verify to {formatted_phone}: SID={verification.sid}")
             return {"method": "twilio_verify", "verification_sid": verification.sid}
         except Exception as e:
-            logger.error(f"Twilio Verify failed: {e}. Falling back to standard Twilio SMS.")
+            logger.warning(f"Twilio Verify failed or timed out: {e}. Falling back to standard Twilio SMS.")
 
     # Tier 2: Standard Twilio SMS OTP
     if client and settings.TWILIO_PHONE_NUMBER:
         try:
             code = str(random.randint(100000, 999999))
             message_body = f"Your SafeHer AI security code is {code}. It is valid for 5 minutes. Please do not share this code."
-            success = await send_emergency_sms(user_id="SYSTEM_2FA", to_phone=formatted_phone, message=message_body)
+            # Quick 1-attempt send with strict 3.0 second timeout to eliminate slow hanging
+            success = await asyncio.wait_for(
+                send_emergency_sms(user_id="SYSTEM_2FA", to_phone=formatted_phone, message=message_body, retries=1),
+                timeout=3.0
+            )
             if success:
                 logger.info(f"OTP sent via Twilio SMS to {formatted_phone}")
                 return {"method": "twilio_sms", "code": code}
             else:
-                logger.error("Standard SMS OTP send failed. Falling back to Mock OTP.")
+                logger.warning(f"Twilio SMS send was unsuccessful for {formatted_phone}. Using dev fallback.")
+        except asyncio.TimeoutError:
+            logger.warning(f"Twilio SMS timed out (>3s). Falling back immediately to Dev OTP.")
         except Exception as e:
-            logger.error(f"Standard SMS OTP failed: {e}. Falling back to Mock OTP.")
+            logger.warning(f"Standard SMS OTP failed: {e}. Falling back to Dev OTP.")
 
-    # Tier 3: Mock Mode
-    code = "123456" # Use a stable dev code, or generate random. Standardizing 123456 makes frontend manual testing incredibly smooth.
+    # Tier 3: Mock / Dev Fast Fallback
+    code = "123456" # Master dev code for instant testing without SMS gateway lag
     logger.warning(f"============================================================")
     logger.warning(f"🔐 [MOCK OTP CODE] Sent to phone: {formatted_phone} | Code: {code}")
     logger.warning(f"============================================================")

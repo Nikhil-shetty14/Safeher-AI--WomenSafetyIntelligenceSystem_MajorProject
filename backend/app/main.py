@@ -7,16 +7,17 @@ import os
 from app.core.config import settings
 from app.core.database import connect_db, close_db
 from app.websockets.socket_manager import sio
-from app.api.routes import auth, sos, contacts, ai, location, admin, profile, complaints, broadcast, state_dashboard, reports
+from app.api.routes import auth, sos, contacts, ai, location, admin, profile, complaints, broadcast, state_dashboard, reports, admin_import
 from loguru import logger
 
 # Configure loguru
 logger.add("logs/safeher_{time}.log", rotation="1 day", retention="7 days", level="INFO")
+logger.info("Initializing SafeHer AI routes including Predictive Guardian...")
 
 # FastAPI app
 app = FastAPI(
-    title="SafeHer AI API",
-    description="AI-powered women's safety backend with real-time SOS, GPS tracking, and intelligent threat detection.",
+    title="SafeHer AI – AI-Powered Women Safety Intelligence System",
+    description="AI Intelligence Engine powering real-time SOS, predictive safe routing, and intelligent threat detection. Detect. Understand. Predict. Protect.",
     version=settings.APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -79,6 +80,7 @@ app.include_router(complaints.router)
 app.include_router(broadcast.router)
 app.include_router(state_dashboard.router)
 app.include_router(reports.router)
+app.include_router(admin_import.router)
 
 # Static files (audio uploads)
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

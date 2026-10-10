@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar,
-  Modal, TextInput, Alert, ActivityIndicator,
+  Modal, TextInput, Alert, ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { contactsAPI } from '../api/client';
@@ -12,6 +12,7 @@ const RELATIONSHIPS = ['Mother', 'Father', 'Sister', 'Brother', 'Friend', 'Husba
 export default function ContactsScreen() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', relationship: 'Mother', email: '', is_primary: false });
   const [saving, setSaving] = useState(false);
@@ -27,6 +28,15 @@ export default function ContactsScreen() {
     } catch { setContacts([]); }
     if (showSpinner) setLoading(false);
   };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await contactsAPI.getAll();
+      setContacts(res.data || []);
+    } catch { }
+    setRefreshing(false);
+  }, []);
 
   const openAdd = () => {
     setForm({ name: '', phone: '', relationship: 'Mother', email: '', is_primary: false });
@@ -142,15 +152,20 @@ export default function ContactsScreen() {
       {loading ? (
         <ActivityIndicator color={Colors.primary} size="large" style={{ marginTop: 60 }} />
       ) : contacts.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="people-outline" size={64} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>No Emergency Contacts</Text>
-          <Text style={styles.emptySubtitle}>Add trusted contacts who'll be notified during an SOS emergency.</Text>
-          <TouchableOpacity style={styles.emptyBtn} onPress={openAdd}>
-            <Ionicons name="add-circle" size={20} color={Colors.white} />
-            <Text style={styles.emptyBtnText}>  Add First Contact</Text>
-          </TouchableOpacity>
-        </View>
+        <ScrollView
+          contentContainerStyle={styles.emptyScroll}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} tintColor={Colors.primary} />}
+        >
+          <View style={styles.emptyState}>
+            <Ionicons name="people-outline" size={64} color={Colors.textMuted} />
+            <Text style={styles.emptyTitle}>No Emergency Contacts</Text>
+            <Text style={styles.emptySubtitle}>Add trusted contacts who'll be notified during an SOS emergency.</Text>
+            <TouchableOpacity style={styles.emptyBtn} onPress={openAdd}>
+              <Ionicons name="add-circle" size={20} color={Colors.white} />
+              <Text style={styles.emptyBtnText}>  Add First Contact</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={contacts}
@@ -158,6 +173,7 @@ export default function ContactsScreen() {
           renderItem={renderContact}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} tintColor={Colors.primary} />}
         />
       )}
 
@@ -262,6 +278,7 @@ const styles = StyleSheet.create({
   relation: { fontSize: Typography.fontSizeSM, color: Colors.textMuted, marginTop: 1 },
   actions: { flexDirection: 'row', gap: 4 },
   actionBtn: { padding: 8 },
+  emptyScroll: { flexGrow: 1, justifyContent: 'center' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl, gap: 12 },
   emptyTitle: { fontSize: Typography.fontSize2XL, fontWeight: Typography.fontWeightBold, color: Colors.textPrimary },
   emptySubtitle: { color: Colors.textSecondary, textAlign: 'center', lineHeight: 22 },

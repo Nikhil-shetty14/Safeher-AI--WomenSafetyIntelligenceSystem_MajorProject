@@ -9,7 +9,7 @@ import { Platform } from "react-native";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext";
 
-const DEFAULT_SOCKET_HOST = "http://10.165.16.100:8000";
+const DEFAULT_SOCKET_HOST = "http://10.230.99.100:8000";
 
 const SOCKET_URL =
   process.env.EXPO_PUBLIC_SOCKET_URL ||

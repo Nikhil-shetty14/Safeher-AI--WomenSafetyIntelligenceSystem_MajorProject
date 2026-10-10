@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 import uuid
 from app.models.user import UserCreate, UserLogin, UserUpdate, UserResponse, ForgotPasswordRequest, ResetPasswordRequest
 from app.services.user_service import (
-    authenticate_user, update_user, format_user_response
+    authenticate_user, update_user, format_user_response, get_phone_variants
 )
-from app.services.twilio_service import send_otp, verify_otp
+from app.services.twilio_service import send_otp, verify_otp, format_phone_number
 from app.core.security import create_access_token, get_current_user, get_password_hash
 from app.core.database import get_collection
 from loguru import logger
@@ -40,14 +40,18 @@ async def register(user_data: UserCreate):
     to the registered phone number.
     """
     try:
+        # Normalize phone to canonical E.164 format (+91XXXXXXXXXX)
+        user_data.phone = format_phone_number(user_data.phone)
+
         users_collection = get_collection("users")
         if users_collection is None:
             raise HTTPException(status_code=503, detail="Database unavailable")
 
-        # Check if phone is already taken
-        existing_user = await users_collection.find_one({"phone": user_data.phone})
+        # Check if phone is already taken across all common variants (+91 / without +91)
+        variants = get_phone_variants(user_data.phone)
+        existing_user = await users_collection.find_one({"phone": {"$in": variants}})
         if existing_user:
-            raise HTTPException(status_code=400, detail="Phone number already registered")
+            raise HTTPException(status_code=400, detail="Phone number already registered. Please sign in instead.")
 
         # Send OTP to user's phone number
         try:
@@ -96,6 +100,7 @@ async def register(user_data: UserCreate):
             "status": "2fa_pending",
             "session_id": session_id,
             "phone": mask_phone_number(user_data.phone),
+            "dev_code": otp_res.get("code") if otp_res.get("method") == "mock" else None,
         }
     except HTTPException:
         raise
@@ -110,8 +115,11 @@ async def login(credentials: UserLogin):
     Step 1 of Login: Verify credentials and send an OTP code
     to the registered phone number.
     """
+    # Normalize phone to canonical E.164 format
+    normalized_phone = format_phone_number(credentials.phone)
+
     # 1. Authenticate user credentials first
-    user = await authenticate_user(credentials.phone, credentials.password)
+    user = await authenticate_user(normalized_phone, credentials.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid phone number or password")
     
@@ -156,6 +164,7 @@ async def login(credentials: UserLogin):
         "status": "2fa_pending",
         "session_id": session_id,
         "phone": mask_phone_number(user["phone"]),
+        "dev_code": otp_res.get("code") if otp_res.get("method") == "mock" else None,
     }
 
 
@@ -206,8 +215,9 @@ async def verify_otp_endpoint(payload: VerifyOTPRequest):
         if users_collection is None:
             raise HTTPException(status_code=503, detail="Database unavailable")
 
-        # Double check phone uniqueness again to avoid race conditions
-        existing_user = await users_collection.find_one({"phone": session["phone"]})
+        # Double check phone uniqueness again across variants to avoid race conditions
+        variants = get_phone_variants(session["phone"])
+        existing_user = await users_collection.find_one({"phone": {"$in": variants}})
         if existing_user:
             await pending_collection.delete_one({"_id": payload.session_id})
             raise HTTPException(status_code=400, detail="Phone number already registered")
@@ -357,7 +367,9 @@ async def forgot_password(payload: ForgotPasswordRequest):
     users_collection = get_collection("users")
     
     try:
-        user = await users_collection.find_one({"phone": payload.phone})
+        normalized_phone = format_phone_number(payload.phone)
+        variants = get_phone_variants(normalized_phone)
+        user = await users_collection.find_one({"phone": {"$in": variants}})
     except Exception as e:
         logger.error(f"Database error during forgot-password lookup: {e}")
         raise HTTPException(status_code=503, detail="Database connection error. Please try again later.")

@@ -20,6 +20,11 @@ def _check_ai():
     if _ai_available is not None:
         return _ai_available
     try:
+        try:
+            import static_ffmpeg
+            static_ffmpeg.add_paths()
+        except Exception as fe:
+            logger.warning(f"static_ffmpeg setup: {fe}")
         import torch  # noqa: F401
         import whisper  # noqa: F401
         _ai_available = True

@@ -74,8 +74,13 @@ export default function SafeTimerScreen({ navigation }: any) {
       const { status } = await Location.requestForegroundPermissionsAsync();
       let loc = null;
       if (status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        loc = pos.coords;
+        let pos;
+        try {
+          pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        } catch {
+          pos = await Location.getLastKnownPositionAsync();
+        }
+        loc = pos?.coords || null;
       }
       await sosAPI.trigger({
         user_id: user?.id,

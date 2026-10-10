@@ -24,6 +24,7 @@ api.interceptors.response.use(
 export const adminAPI = {
   login: (identifier: string, password: string) =>
     api.post('/api/admin/login', { identifier, password }),
+  getMe: () => api.get('/api/admin/me'),
   getStats: () => api.get('/api/admin/stats'),
   getRecentAlerts: (limit = 50) =>
     api.get(`/api/admin/alerts/recent?limit=${limit}`),
@@ -39,6 +40,7 @@ export const adminAPI = {
   resolveAlert: (id: string) => api.patch(`/api/sos/${id}/resolve`),
   deleteAlert: (id: string) => api.delete(`/api/admin/alerts/${id}`),
   getAlertIntelligence: (id: string) => api.get(`/api/admin/alerts/${id}/intelligence`),
+  importUsers: (data: any) => api.post('/api/admin/import/users', data),
   getComplaints: () => api.get('/api/complaints/admin/all'),
   updateComplaint: (id: string, data: any) => api.patch(`/api/complaints/admin/${id}`, data),
   deleteComplaint: (id: string) => api.delete(`/api/complaints/admin/${id}`),

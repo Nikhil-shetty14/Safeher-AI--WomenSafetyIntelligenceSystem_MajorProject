@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from app.core.config import settings
@@ -62,9 +61,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
     user = await collection.find_one({"_id": user_id})
     if user is None:
-        # Try by email
-        email = payload.get("email")
-        user = await collection.find_one({"email": email})
+        # Fallback: try lookup by phone (which IS included in the JWT).
+        # This covers edge cases where the user _id format changed or was migrated.
+        phone = payload.get("phone")
+        if phone:
+            from app.services.user_service import get_phone_variants
+            variants = get_phone_variants(phone)
+            user = await collection.find_one({"phone": {"$in": variants}})
 
     if user is None:
         raise credentials_exception
