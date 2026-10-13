@@ -38,18 +38,8 @@ import { Colors, Typography, Spacing, BorderRadius } from '../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// High-contrast clean dark fallback style for native base map
-const CLEAN_DARK_BASE_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#020617' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#334155' }] },
-  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3b82f6' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0284c7' }] },
-];
+
+
 
 interface EmergencyService {
   id: string;
@@ -85,7 +75,7 @@ function MapScreen() {
   const [locationHistory, setLocationHistory] = useState<RouteGeometryPoint[]>([]);
 
   // ─── Mapbox Styling & Tile Layers ─────────────────────
-  const [mapStyle, setMapStyle] = useState<MapboxStyleType>('dark');
+  const [mapStyle, setMapStyle] = useState<MapboxStyleType>('streets');
   const [styleSelectorOpen, setStyleSelectorOpen] = useState(false);
   const [mapReady, setMapReady] = useState(false);
 
@@ -383,57 +373,81 @@ function MapScreen() {
 
       setPermissionDenied(false);
 
-      // Fetch accurate real-world GPS position
-      let coords: Location.LocationObjectCoords | null = null;
+      // 1. FAST PATH: Check last known position immediately (< 30ms)
+      const lastKnown = await Location.getLastKnownPositionAsync().catch(() => null);
+      if (lastKnown?.coords) {
+        const cachedCoords = lastKnown.coords;
+        setLocation(cachedCoords);
+        setLocationLoaded(true);
+        mapRef.current?.animateToRegion(
+          {
+            latitude: cachedCoords.latitude,
+            longitude: cachedCoords.longitude,
+            latitudeDelta: 0.015,
+            longitudeDelta: 0.015,
+          },
+          600
+        );
+        resolveAddress(cachedCoords.latitude, cachedCoords.longitude);
+        fetchNearbyData(cachedCoords.latitude, cachedCoords.longitude);
+      }
+
+      // 2. Start continuous GPS telemetry watcher
+      startTrackingStream();
+
+      // 3. Acquire fresh satellite lock in parallel
       try {
-        const locPromise = Location.getCurrentPositionAsync({
+        const freshLocPromise = Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.High,
         });
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('GPS acquisition timeout')), 8000)
+          setTimeout(() => reject(new Error('GPS acquisition timeout')), 6000)
         );
-        const loc = (await Promise.race([locPromise, timeoutPromise])) as Location.LocationObject;
-        coords = loc.coords;
-      } catch (timeoutErr) {
-        console.warn('High-accuracy GPS timeout, trying last known position:', timeoutErr);
-        const lastKnown = await Location.getLastKnownPositionAsync();
-        if (lastKnown) {
-          coords = lastKnown.coords;
+        const freshLoc = (await Promise.race([freshLocPromise, timeoutPromise])) as Location.LocationObject;
+        if (freshLoc?.coords) {
+          const freshCoords = freshLoc.coords;
+          setLocation(freshCoords);
+          setLocationLoaded(true);
+          mapRef.current?.animateToRegion(
+            {
+              latitude: freshCoords.latitude,
+              longitude: freshCoords.longitude,
+              latitudeDelta: 0.015,
+              longitudeDelta: 0.015,
+            },
+            800
+          );
+          resolveAddress(freshCoords.latitude, freshCoords.longitude);
+          fetchNearbyData(freshCoords.latitude, freshCoords.longitude);
+        }
+      } catch (freshErr) {
+        // High-accuracy GPS timed out or indoors, try balanced accuracy
+        if (!locationRef.current) {
+          const balanced = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          }).catch(() => null);
+          if (balanced?.coords) {
+            setLocation(balanced.coords);
+            setLocationLoaded(true);
+            mapRef.current?.animateToRegion(
+              {
+                latitude: balanced.coords.latitude,
+                longitude: balanced.coords.longitude,
+                latitudeDelta: 0.015,
+                longitudeDelta: 0.015,
+              },
+              800
+            );
+            resolveAddress(balanced.coords.latitude, balanced.coords.longitude);
+            fetchNearbyData(balanced.coords.latitude, balanced.coords.longitude);
+          }
         }
       }
 
-      if (!coords) {
-        // Fallback to balanced accuracy
-        const fallbackLoc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        coords = fallbackLoc.coords;
-      }
-
-      setLocation(coords);
       setLocationLoaded(true);
-
-      // Animate map camera to real GPS position
-      setTimeout(() => {
-        mapRef.current?.animateCamera(
-          {
-            center: { latitude: coords!.latitude, longitude: coords!.longitude },
-            zoom: 16,
-          },
-          { duration: 800 }
-        );
-      }, 500);
-
-      // Fire data fetching and reverse geocoding
-      resolveAddress(coords.latitude, coords.longitude);
-      fetchNearbyData(coords.latitude, coords.longitude);
-
-      // Automatically start background/foreground GPS tracking
-      startTrackingStream();
     } catch (err: any) {
-      console.error('Fatal location initialization error:', err);
+      console.warn('Location initialization warning:', err);
       setLocationLoaded(true);
-      Alert.alert('GPS Signal Error', 'Unable to acquire satellite GPS signal. Please check location settings.');
     }
   }, [fetchNearbyData, resolveAddress, startTrackingStream]);
 
@@ -673,12 +687,14 @@ function MapScreen() {
   const centerMapOnGPS = useCallback(() => {
     const currentLoc = locationRef.current;
     if (mapRef.current && currentLoc) {
-      mapRef.current.animateCamera(
+      mapRef.current.animateToRegion(
         {
-          center: { latitude: currentLoc.latitude, longitude: currentLoc.longitude },
-          zoom: 16.5,
+          latitude: currentLoc.latitude,
+          longitude: currentLoc.longitude,
+          latitudeDelta: 0.012,
+          longitudeDelta: 0.012,
         },
-        { duration: 600 }
+        600
       );
       Vibration.vibrate(30);
     }
@@ -741,83 +757,102 @@ function MapScreen() {
     return Colors.severitySafe;
   };
 
-  // ─── Memoized Initial Region ──────────────────────────
-  const initialRegion: Region | undefined = useMemo(() => {
-    if (!location) return undefined;
-    return {
-      latitude: location.latitude,
-      longitude: location.longitude,
-      latitudeDelta: 0.012,
-      longitudeDelta: 0.012,
-    };
-  }, [locationLoaded]);
+  // ─── Default Regional Coordinates Fallback ───────────
+  const DEFAULT_INITIAL_REGION: Region = useMemo(
+    () => ({
+      latitude: 12.9716,
+      longitude: 77.5946,
+      latitudeDelta: 0.015,
+      longitudeDelta: 0.015,
+    }),
+    []
+  );
+
+  // ─── Memoized Active Region ───────────────────────────
+  const initialRegion: Region = useMemo(() => {
+    if (location) {
+      return {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.012,
+        longitudeDelta: 0.012,
+      };
+    }
+    return DEFAULT_INITIAL_REGION;
+  }, [location, DEFAULT_INITIAL_REGION]);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      {/* ─── Loading / Acquiring GPS Screen ────────────── */}
-      {!locationLoaded && (
-        <View style={styles.loadingOverlay}>
-          <Animated.View
-            style={[
-              styles.loadingPulse,
-              {
-                transform: [{ scale: pulseAnim }],
-              },
-            ]}
-          />
-          <Ionicons name="navigate-circle" size={56} color={Colors.primary} />
-          <Text style={styles.loadingTitle}>Acquiring High-Precision GPS...</Text>
-          <Text style={styles.loadingSub}>Connecting to SafeHer AI & Mapbox Telemetry</Text>
+      {/* ─── Non-Blocking Floating GPS Status Overlays ──── */}
+      {!location && !permissionDenied && (
+        <View style={styles.floatingGpsBanner}>
+          <Animated.View style={[styles.gpsPulseDot, { transform: [{ scale: pulseAnim }] }]} />
+          <Ionicons name="navigate-circle" size={16} color={Colors.primaryLight} />
+          <Text style={styles.floatingGpsText}>Acquiring high-precision satellite GPS...</Text>
         </View>
       )}
 
-      {/* ─── Permission Denied Screen ──────────────────── */}
-      {locationLoaded && permissionDenied && !location && (
-        <View style={styles.loadingOverlay}>
-          <Ionicons name="location-outline" size={60} color={Colors.danger} />
-          <Text style={styles.loadingTitle}>Location Permission Denied</Text>
-          <Text style={styles.loadingSub}>
-            Location access is mandatory for live safety navigation and emergency response.
-          </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={initLocation}>
-            <Text style={styles.primaryBtnText}>GRANT PERMISSION</Text>
+      {permissionDenied && (
+        <View style={styles.floatingPermissionBanner}>
+          <Ionicons name="location-outline" size={16} color={Colors.danger} />
+          <Text style={styles.floatingPermissionText}>Location access needed for live GPS.</Text>
+          <TouchableOpacity style={styles.floatingPermissionBtn} onPress={initLocation}>
+            <Text style={styles.floatingPermissionBtnText}>ENABLE</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* ─── Native Mapbox Surface Layer ───────────────── */}
-      {locationLoaded && location && initialRegion && (
-        <MapView
-          ref={mapRef}
-          style={StyleSheet.absoluteFill}
-          customMapStyle={CLEAN_DARK_BASE_STYLE}
-          initialRegion={initialRegion}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          showsCompass={false}
-          loadingEnabled={false}
-          toolbarEnabled={false}
-          moveOnMarkerPress={false}
-          onMapReady={() => setMapReady(true)}
-        >
-          {/* Mapbox High-Resolution Raster Tile Layer */}
-          <UrlTile
-            urlTemplate={MAPBOX_STYLES[mapStyle].urlTemplate}
-            maximumZ={19}
-            minimumZ={1}
-            tileSize={256}
-            zIndex={-1}
-            shouldReplaceMapContent={true}
-          />
+      {/* ─── Native Map Surface Layer ───────────────── */}
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFill}
+        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
+        initialRegion={initialRegion}
+        showsUserLocation={Platform.OS === 'ios'}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        loadingEnabled={true}
+        loadingIndicatorColor="#8b5cf6"
+        loadingBackgroundColor="#1a1a2e"
+        toolbarEnabled={false}
+        moveOnMarkerPress={false}
+        onMapReady={() => {
+          setMapReady(true);
+          console.log('[MapScreen] Native MapView ready');
+          const currentLoc = locationRef.current;
+          if (currentLoc) {
+            mapRef.current?.animateToRegion(
+              {
+                latitude: currentLoc.latitude,
+                longitude: currentLoc.longitude,
+                latitudeDelta: 0.015,
+                longitudeDelta: 0.015,
+              },
+              800
+            );
+          }
+        }}
+      >
+        {/* Raster Tile Layer — CARTO/OSM tiles (no API key needed, works without Google Maps SDK) */}
+        <UrlTile
+          key={mapStyle}
+          urlTemplate={MAPBOX_STYLES[mapStyle]?.urlTemplate || MAPBOX_STYLES.streets.urlTemplate}
+          maximumZ={19}
+          minimumZ={1}
+          flipY={false}
+          tileSize={256}
+          zIndex={1}
+          shouldReplaceMapContent={Platform.OS === 'ios'}
+        />
 
-          {/* User Live GPS Marker */}
+        {/* User Live GPS Marker */}
+        {location && (
           <Marker
             coordinate={{ latitude: location.latitude, longitude: location.longitude }}
             anchor={{ x: 0.5, y: 0.5 }}
             zIndex={100}
-            tracksViewChanges={false}
           >
             <View style={styles.userMarkerContainer}>
               <View style={[styles.userPulseRing, sosTriggered && styles.userPulseRingSOS]} />
@@ -826,131 +861,126 @@ function MapScreen() {
               </View>
             </View>
           </Marker>
+        )}
 
-          {/* SOS Blinking Geofence Ring */}
-          {sosTriggered && (
-            <Circle
-              center={{ latitude: location.latitude, longitude: location.longitude }}
-              radius={400}
-              fillColor="rgba(239, 68, 68, 0.18)"
-              strokeColor="#ef4444"
-              strokeWidth={2}
-            />
-          )}
+        {/* SOS Blinking Geofence Ring */}
+        {sosTriggered && location && (
+          <Circle
+            center={{ latitude: location.latitude, longitude: location.longitude }}
+            radius={400}
+            fillColor="rgba(239, 68, 68, 0.18)"
+            strokeColor="#ef4444"
+            strokeWidth={2}
+          />
+        )}
 
-          {/* AI Danger Zones Circles & Badges */}
-          {mapReady &&
-            heatmapVisible &&
-            dangerZones.map((zone) => (
-              <React.Fragment key={zone.id}>
-                <Circle
-                  center={{ latitude: zone.latitude, longitude: zone.longitude }}
-                  radius={zone.radius}
-                  fillColor={
-                    zone.risk === 'critical'
-                      ? 'rgba(220, 38, 38, 0.28)'
-                      : zone.risk === 'high'
-                      ? 'rgba(239, 68, 68, 0.20)'
-                      : 'rgba(245, 158, 11, 0.18)'
-                  }
-                  strokeColor={
-                    zone.risk === 'critical'
-                      ? '#dc2626'
-                      : zone.risk === 'high'
-                      ? '#ef4444'
-                      : '#f59e0b'
-                  }
-                  strokeWidth={2}
-                />
-                <Marker
-                  coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={false}
-                  onPress={() => {
-                    Alert.alert(
-                      '🚨 AI Danger Zone',
-                      `${zone.name}\n\nThreat Score: ${zone.score}%\nLevel: ${zone.risk.toUpperCase()}\n\nSafeHer AI advises choosing an alternate illuminated route.`
-                    );
-                  }}
-                >
-                  <View style={styles.dangerZoneBadge}>
-                    <Ionicons name="warning" size={11} color="#fff" />
-                    <Text style={styles.dangerZoneBadgeText}>{zone.score}%</Text>
-                  </View>
-                </Marker>
-              </React.Fragment>
-            ))}
-
-          {/* Emergency Services Markers */}
-          {mapReady &&
-            emergencyServices
-              .filter((service) => activeFilters[service.type])
-              .map((service) => (
-                <Marker
-                  key={service.id}
-                  coordinate={{ latitude: service.latitude, longitude: service.longitude }}
-                  tracksViewChanges={false}
-                  onPress={() => {
-                    setSelectedService(service);
-                    Vibration.vibrate(30);
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.serviceMarkerBadge,
-                      service.type === 'police' && styles.policeBadge,
-                      service.type === 'hospital' && styles.hospitalBadge,
-                      service.type === 'women_center' && styles.womenBadge,
-                    ]}
-                  >
-                    <Ionicons
-                      name={
-                        service.type === 'police'
-                          ? 'shield'
-                          : service.type === 'hospital'
-                          ? 'medical'
-                          : 'heart'
-                      }
-                      size={15}
-                      color="#fff"
-                    />
-                  </View>
-                </Marker>
-              ))}
-
-          {/* Safe Route Polyline (Emerald Green Glow) */}
-          {safeTripMode && routePolyline.length > 0 && (
-            <>
-              {/* Outer glow polyline */}
-              <Polyline
-                coordinates={routePolyline}
-                strokeColor="rgba(16, 185, 129, 0.35)"
-                strokeWidth={9}
+        {/* AI Danger Zones Circles & Badges */}
+        {heatmapVisible &&
+          dangerZones.map((zone) => (
+            <React.Fragment key={zone.id}>
+              <Circle
+                center={{ latitude: zone.latitude, longitude: zone.longitude }}
+                radius={zone.radius}
+                fillColor={
+                  zone.risk === 'critical'
+                    ? 'rgba(220, 38, 38, 0.28)'
+                    : zone.risk === 'high'
+                    ? 'rgba(239, 68, 68, 0.20)'
+                    : 'rgba(245, 158, 11, 0.18)'
+                }
+                strokeColor={
+                  zone.risk === 'critical'
+                    ? '#dc2626'
+                    : zone.risk === 'high'
+                    ? '#ef4444'
+                    : '#f59e0b'
+                }
+                strokeWidth={2}
               />
-              {/* Inner primary path polyline */}
-              <Polyline
-                coordinates={routePolyline}
-                strokeColor="#10b981"
-                strokeWidth={4.5}
-                lineDashPattern={[0]}
-              />
-            </>
-          )}
+              <Marker
+                coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                onPress={() => {
+                  Alert.alert(
+                    '🚨 AI Danger Zone',
+                    `${zone.name}\n\nThreat Score: ${zone.score}%\nLevel: ${zone.risk.toUpperCase()}\n\nSafeHer AI advises choosing an alternate illuminated route.`
+                  );
+                }}
+              >
+                <View style={styles.dangerZoneBadge}>
+                  <Ionicons name="warning" size={11} color="#fff" />
+                  <Text style={styles.dangerZoneBadgeText}>{zone.score}%</Text>
+                </View>
+              </Marker>
+            </React.Fragment>
+          ))}
 
-          {/* Destination Marker */}
-          {safeTripMode && routePolyline.length > 0 && (
+        {/* Emergency Services Markers */}
+        {emergencyServices
+          .filter((service) => activeFilters[service.type])
+          .map((service) => (
             <Marker
-              coordinate={routePolyline[routePolyline.length - 1]}
-              title={activeDestinationTitle || 'Destination'}
-              tracksViewChanges={false}
+              key={service.id}
+              coordinate={{ latitude: service.latitude, longitude: service.longitude }}
+              onPress={() => {
+                setSelectedService(service);
+                Vibration.vibrate(30);
+              }}
             >
-              <View style={styles.destinationMarkerBadge}>
-                <Ionicons name="flag" size={16} color="#fff" />
+              <View
+                style={[
+                  styles.serviceMarkerBadge,
+                  service.type === 'police' && styles.policeBadge,
+                  service.type === 'hospital' && styles.hospitalBadge,
+                  service.type === 'women_center' && styles.womenBadge,
+                ]}
+              >
+                <Ionicons
+                  name={
+                    service.type === 'police'
+                      ? 'shield'
+                      : service.type === 'hospital'
+                      ? 'medical'
+                      : 'heart'
+                  }
+                  size={15}
+                  color="#fff"
+                />
               </View>
             </Marker>
-          )}
-        </MapView>
-      )}
+          ))}
+
+        {/* Safe Route Polyline (Emerald Green Glow) */}
+        {safeTripMode && routePolyline.length > 0 && (
+          <>
+            {/* Outer glow polyline */}
+            <Polyline
+              coordinates={routePolyline}
+              strokeColor="rgba(16, 185, 129, 0.35)"
+              strokeWidth={9}
+            />
+            {/* Inner primary path polyline */}
+            <Polyline
+              coordinates={routePolyline}
+              strokeColor="#10b981"
+              strokeWidth={4.5}
+              lineDashPattern={[0]}
+            />
+          </>
+        )}
+
+        {/* Destination Marker */}
+        {safeTripMode && routePolyline.length > 0 && (
+          <Marker
+            coordinate={routePolyline[routePolyline.length - 1]}
+            title={activeDestinationTitle || 'Destination'}
+          >
+            <View style={styles.destinationMarkerBadge}>
+              <Ionicons name="flag" size={16} color="#fff" />
+            </View>
+          </Marker>
+        )}
+      </MapView>
 
       {/* ─── Emergency SOS Full-Screen Glowing Border ──── */}
       {sosTriggered && (
@@ -1373,7 +1403,74 @@ export default React.memo(MapScreen);
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06040c',
+    backgroundColor: '#1a1a2e',
+  },
+  floatingGpsBanner: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 115 : 105,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 10, 30, 0.94)',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.4)',
+    zIndex: 60,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 6,
+  },
+  floatingGpsText: {
+    fontSize: 11,
+    color: '#c4b5fd',
+    fontWeight: Typography.fontWeightBold,
+  },
+  gpsPulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.primary,
+  },
+  floatingPermissionBanner: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 115 : 105,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    zIndex: 60,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 6,
+  },
+  floatingPermissionText: {
+    fontSize: 11,
+    color: '#fca5a5',
+    fontWeight: Typography.fontWeightBold,
+  },
+  floatingPermissionBtn: {
+    backgroundColor: Colors.danger,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: BorderRadius.sm,
+  },
+  floatingPermissionBtnText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: Typography.fontWeightExtrabold,
   },
   loadingOverlay: {
     position: 'absolute',

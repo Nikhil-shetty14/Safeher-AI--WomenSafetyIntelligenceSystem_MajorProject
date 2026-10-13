@@ -41,6 +41,9 @@ class SOSAlertResponse(BaseModel):
     trigger_type: str
     severity: AlertSeverity
     status: AlertStatus
+    acknowledged: Optional[bool] = False
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
     location: LocationData
     message: Optional[str] = None
     ai_analysis: Optional[dict] = None

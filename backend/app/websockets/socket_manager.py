@@ -1,3 +1,4 @@
+import uuid
 import socketio
 from loguru import logger
 from typing import Dict, Set
@@ -101,12 +102,21 @@ async def sos_triggered(sid, data):
     user_id = data.get("user_id")
     location = data.get("location", {})
 
+    alert_id = data.get("alert_id") or str(uuid.uuid4())
     alert_broadcast = {
         "type": "sos_alert",
+        "alert_id": alert_id,
+        "id": alert_id,
         "user_id": user_id,
+        "user_name": data.get("user_name"),
+        "user_phone": data.get("user_phone"),
         "location": location,
         "timestamp": datetime.utcnow().isoformat(),
         "severity": data.get("severity", "high"),
+        "trigger_type": data.get("trigger_type", "socket_trigger"),
+        "message": data.get("message"),
+        "status": "active",
+        "acknowledged": False,
     }
 
     if admin_sockets:

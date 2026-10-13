@@ -15,9 +15,11 @@ import {
   BrainCircuit,
 } from "lucide-react";
 import { useAdminAuth } from "./AuthContext";
+import { useSOSAlerts } from "./SOSAlertContext";
 
 export default function Sidebar() {
   const { logout, user } = useAdminAuth();
+  const { unacknowledgedCount, criticalCount } = useSOSAlerts();
   const collapsed = false;
   const width = 280;
 
@@ -80,6 +82,8 @@ export default function Sidebar() {
             to="/alerts"
             icon={Bell}
             label="Emergency Alerts"
+            badge={unacknowledgedCount}
+            isCritical={criticalCount > 0}
           />
           <NavItem
             collapsed={collapsed}
@@ -163,7 +167,7 @@ export default function Sidebar() {
   );
 }
 
-const NavItem = ({ to, icon: Icon, label, collapsed }: any) => (
+const NavItem = ({ to, icon: Icon, label, collapsed, badge, isCritical }: any) => (
   <NavLink
     to={to}
     style={({ isActive }) => ({
@@ -181,8 +185,75 @@ const NavItem = ({ to, icon: Icon, label, collapsed }: any) => (
         : "none",
     })}
   >
-    <Icon size={20} />
-    {!collapsed && <span style={s.navLabelText}>{label}</span>}
+    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+      <Icon size={20} />
+      {collapsed && badge > 0 && (
+        <span
+          className={isCritical ? "sos-badge-critical" : ""}
+          style={{
+            position: "absolute",
+            top: -3,
+            right: -3,
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: isCritical ? "#ef4444" : "#8b5cf6",
+            boxShadow: isCritical ? "0 0 8px #ef4444" : "0 0 6px #8b5cf6",
+          }}
+        />
+      )}
+    </div>
+    {!collapsed && (
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flex: 1,
+          marginLeft: "12px",
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>{label}</span>
+        {badge > 0 && (
+          <span
+            className={isCritical ? "sos-badge-critical" : ""}
+            style={{
+              padding: "2px 7px",
+              borderRadius: "10px",
+              fontSize: "11px",
+              fontWeight: 800,
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              background: isCritical
+                ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+                : "rgba(139, 92, 246, 0.2)",
+              color: isCritical ? "#ffffff" : "#c4b5fd",
+              border: `1px solid ${
+                isCritical ? "rgba(239, 68, 68, 0.8)" : "rgba(139, 92, 246, 0.4)"
+              }`,
+              boxShadow: isCritical
+                ? "0 0 12px rgba(239, 68, 68, 0.75)"
+                : "none",
+              letterSpacing: "0.2px",
+            }}
+          >
+            {isCritical && (
+              <span
+                style={{
+                  width: "5px",
+                  height: "5px",
+                  borderRadius: "50%",
+                  background: "#fff",
+                  display: "inline-block",
+                }}
+              />
+            )}
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
+      </span>
+    )}
   </NavLink>
 );
 

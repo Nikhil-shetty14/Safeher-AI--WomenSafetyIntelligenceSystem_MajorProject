@@ -324,7 +324,10 @@ export default function HomeScreen({ navigation }: any) {
 
           {/* Quick Voice SOS & Silent Mode */}
           <View style={styles.quickAccessRow}>
-             <TouchableOpacity style={[styles.actionCard, { flex: 1, backgroundColor: Colors.danger + '15', borderColor: Colors.danger + '40' }]} onPress={() => navigation.navigate('SOS')}>
+             <TouchableOpacity 
+               style={[styles.actionCard, { flex: 1, backgroundColor: Colors.danger + '15', borderColor: Colors.danger + '40' }]} 
+               onPress={() => navigation.navigate('SOS', { mode: 'voice', autoVoice: true })}
+             >
                 <View style={[styles.iconBox, { backgroundColor: Colors.danger }]}>
                   <Ionicons name="mic" size={24} color={Colors.white} />
                 </View>
@@ -334,7 +337,10 @@ export default function HomeScreen({ navigation }: any) {
                 </View>
              </TouchableOpacity>
 
-             <TouchableOpacity style={[styles.actionCard, { flex: 1 }]} onPress={() => navigation.navigate('SOS')}>
+             <TouchableOpacity 
+               style={[styles.actionCard, { flex: 1 }]} 
+               onPress={() => navigation.navigate('SOS', { mode: 'stealth', autoStealth: true })}
+             >
                 <View style={[styles.iconBox, { backgroundColor: Colors.textSecondary }]}>
                   <Ionicons name="eye-off" size={24} color={Colors.background} />
                 </View>

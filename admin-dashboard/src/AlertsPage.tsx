@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { adminAPI } from "./api";
 import { useSocket } from "./SocketContext";
@@ -41,6 +42,7 @@ interface AlertItem {
   created_at: string;
   location?: AlertLocation;
   ai_analysis?: AlertAIAnalysis;
+  acknowledged?: boolean;
 }
 
 export default function AlertsPage() {
@@ -56,6 +58,8 @@ export default function AlertsPage() {
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
   const [filter, setFilter] = useState("all");
   const { socket } = useSocket();
+  const [searchParams] = useSearchParams();
+  const alertIdParam = searchParams.get("alertId");
 
   const load = useCallback(async () => {
     try {
@@ -74,20 +78,39 @@ export default function AlertsPage() {
     return () => clearInterval(t);
   }, [load]);
 
+  // If navigated with alertId in URL (e.g. from instant popup "View SOS"), auto-select and auto-acknowledge
+  useEffect(() => {
+    if (!alertIdParam) return;
+    const match = alerts.find(a => a.id === alertIdParam);
+    if (match) {
+      setSelectedAlert(match);
+    } else {
+      setSelectedAlert({
+        id: alertIdParam,
+        status: "active",
+        created_at: new Date().toISOString(),
+      });
+    }
+    adminAPI.acknowledgeAlert(alertIdParam).catch(() => {});
+  }, [alertIdParam, alerts]);
+
   useEffect(() => {
     if (!socket) return;
     
     const handleNewAlert = (d: any) => {
       setAlerts(prev => {
-        if (prev.find(a => a.id === d.alert_id)) return prev;
+        const id = d.alert_id || d.id;
+        if (prev.find(a => a.id === id)) return prev;
         const newAlert = {
-          id: d.alert_id,
+          id,
           user_id: d.user_id,
           user_name: d.user_name,
+          user_phone: d.user_phone,
           severity: d.severity,
           location: d.location,
           status: 'active',
-          created_at: d.location?.timestamp || new Date().toISOString()
+          acknowledged: false,
+          created_at: d.location?.timestamp || d.created_at || new Date().toISOString()
         };
         const updated = [newAlert, ...prev];
         try { localStorage.setItem('page_cache_alerts', JSON.stringify(updated)); } catch(e) {}
@@ -95,11 +118,37 @@ export default function AlertsPage() {
       });
     };
 
+    const handleAcknowledged = (d: any) => {
+      const id = d.alert_id || d.id;
+      if (!id) return;
+      setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a));
+    };
+
+    const handleResolved = (d: any) => {
+      const id = d.alert_id || d.id;
+      if (!id) return;
+      setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'resolved', acknowledged: true } : a));
+    };
+
     socket.on('new_sos_alert', handleNewAlert);
+    socket.on('sos_alert_acknowledged', handleAcknowledged);
+    socket.on('sos_alert_resolved', handleResolved);
+
     return () => {
       socket.off('new_sos_alert', handleNewAlert);
+      socket.off('sos_alert_acknowledged', handleAcknowledged);
+      socket.off('sos_alert_resolved', handleResolved);
     };
   }, [socket]);
+
+  const handleAcknowledge = async (id: string) => {
+    try {
+      await adminAPI.acknowledgeAlert(id);
+      setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a));
+    } catch (error) {
+      console.error("Failed to acknowledge alert", error);
+    }
+  };
 
   const handleResolve = async (id: string) => {
     if (!window.confirm("Mark this emergency as RESOLVED?")) return;
@@ -234,6 +283,34 @@ export default function AlertsPage() {
                         <span className={`badge badge-${alert.severity}`}>
                           {alert.severity}
                         </span>
+                        {alert.status === "active" && !alert.acknowledged && (
+                          <span
+                            className="badge"
+                            style={{
+                              background: alert.severity === "critical" ? "#ef4444" : "rgba(249, 115, 22, 0.2)",
+                              color: alert.severity === "critical" ? "#ffffff" : "#fb923c",
+                              border: `1px solid ${alert.severity === "critical" ? "#ef4444" : "rgba(249, 115, 22, 0.4)"}`,
+                              fontWeight: 800,
+                              letterSpacing: "0.5px",
+                              boxShadow: alert.severity === "critical" ? "0 0 10px rgba(239, 68, 68, 0.6)" : "none",
+                            }}
+                          >
+                            NEW
+                          </span>
+                        )}
+                        {alert.status === "active" && alert.acknowledged && (
+                          <span
+                            className="badge"
+                            style={{
+                              background: "rgba(16, 185, 129, 0.15)",
+                              color: "#34d399",
+                              border: "1px solid rgba(16, 185, 129, 0.3)",
+                              fontWeight: 700,
+                            }}
+                          >
+                            ACKNOWLEDGED
+                          </span>
+                        )}
                         {alert.status === "resolved" && (
                           <span className="badge alerts-page__status-flag">
                             RESOLVED
@@ -274,8 +351,21 @@ export default function AlertsPage() {
                   >
                     <Trash2 size={18} />
                   </button>
+                  {alert.status === "active" && !alert.acknowledged && (
+                    <button
+                      onClick={() => handleAcknowledge(alert.id)}
+                      className="alerts-page__card-button glass-card"
+                      style={{ color: "#34d399", borderColor: "rgba(16, 185, 129, 0.3)" }}
+                      title="Acknowledge this emergency"
+                    >
+                      <CheckCircle size={15} /> ACK
+                    </button>
+                  )}
                   <button
-                    onClick={() => setSelectedAlert(alert)}
+                    onClick={() => {
+                      setSelectedAlert(alert);
+                      handleAcknowledge(alert.id);
+                    }}
                     className="alerts-page__card-button glass-card"
                   >
                     VIEW INTEL

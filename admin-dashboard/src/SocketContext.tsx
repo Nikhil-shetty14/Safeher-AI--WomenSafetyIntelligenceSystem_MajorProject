@@ -12,7 +12,7 @@ const SocketContext = createContext<SocketContextType>({ socket: null, connected
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
-  const { token, isAdmin } = useAdminAuth();
+  const { token, isAdmin, user } = useAdminAuth();
 
   useEffect(() => {
     if (!isAdmin || !token) {
@@ -33,7 +33,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     newSocket.on('connect', () => {
       console.log('Dashboard connected to socket');
       setConnected(true);
-      newSocket.emit('register', { role: 'admin' });
+      newSocket.emit('register', { 
+        role: user?.role || 'admin',
+        division: user?.division,
+        district: user?.district
+      });
     });
 
     newSocket.on('disconnect', () => {

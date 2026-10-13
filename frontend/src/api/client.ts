@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const DEFAULT_API_HOST = 'http://10.177.162.100:8000';
+const DEFAULT_API_HOST = 'http://10.47.178.100:8000';
 
 export const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_HOST;
 console.log('SafeHer API host:', BASE_URL);
@@ -121,6 +121,23 @@ const uploadMultipart = (urlPath: string, formData: FormData): Promise<{ data: a
   });
 };
 
+// Automatic network retry with exponential backoff for critical uploads
+const uploadMultipartWithRetry = async (urlPath: string, formData: FormData, maxRetries = 2): Promise<{ data: any; status: number }> => {
+  let lastError: any = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await uploadMultipart(urlPath, formData);
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[API Upload Retry] Attempt ${attempt + 1} failed for ${urlPath}: ${err.message}`);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      }
+    }
+  }
+  throw lastError;
+};
+
 // ─── Health Check ─────────────────────────────────────
 export const healthAPI = {
   check: async () => {
@@ -151,15 +168,29 @@ export const authAPI = {
 
 // ─── SOS ──────────────────────────────────────────────
 export const sosAPI = {
-  trigger: (data: any) => api.post('/api/sos/trigger', data),
+  trigger: async (data: any, retries = 2) => {
+    let lastErr: any = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await api.post('/api/sos/trigger', data);
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`[SOS Trigger Retry] Attempt ${attempt + 1} failed: ${err.message}`);
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
+      }
+    }
+    throw lastErr;
+  },
   triggerWithVoice: (formData: FormData) =>
-    uploadMultipart('/api/sos/trigger-voice', formData),
+    uploadMultipartWithRetry('/api/sos/trigger-voice', formData),
   getMyAlerts: (skip = 0, limit = 20) =>
     api.get(`/api/sos/my-alerts?skip=${skip}&limit=${limit}`),
   resolveAlert: (alertId: string) => api.patch(`/api/sos/${alertId}/resolve`),
   resolve: (alertId: string) => api.patch(`/api/sos/${alertId}/resolve`),
   uploadPhotoEvidence: (formData: FormData) =>
-    uploadMultipart('/api/sos/upload-evidence', formData),
+    uploadMultipartWithRetry('/api/sos/upload-evidence', formData),
 };
 
 // ─── Contacts ─────────────────────────────────────────

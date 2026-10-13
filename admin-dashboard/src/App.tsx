@@ -2,6 +2,10 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AdminAuthProvider, useAdminAuth } from "./AuthContext";
 import { SocketProvider } from "./SocketContext";
+import { NotificationProvider } from "./NotificationContext";
+import { NotificationCenter, NotificationToasts } from "./NotificationUI";
+import { SOSAlertProvider } from "./SOSAlertContext";
+import { SOSInstantPopups } from "./SOSInstantPopups";
 import Sidebar from "./Sidebar";
 import LoginPage from "./LoginPage";
 import Dashboard from "./Dashboard";
@@ -27,8 +31,12 @@ const Layout = ({ children }: { children: React.ReactNode }) => (
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        position: "relative",
       }}
     >
+      <NotificationCenter />
+      <NotificationToasts />
+      <SOSInstantPopups />
       {children}
     </main>
   </div>
@@ -165,7 +173,11 @@ export default function App() {
     <AdminAuthProvider>
       <SocketProvider>
         <BrowserRouter>
-          <AppRoutes />
+          <SOSAlertProvider>
+            <NotificationProvider>
+              <AppRoutes />
+            </NotificationProvider>
+          </SOSAlertProvider>
         </BrowserRouter>
       </SocketProvider>
     </AdminAuthProvider>

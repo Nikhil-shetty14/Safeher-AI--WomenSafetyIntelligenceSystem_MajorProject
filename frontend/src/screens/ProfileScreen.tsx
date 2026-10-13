@@ -192,10 +192,13 @@ export default function ProfileScreen({ navigation }: any) {
   const toggleSafetyPref = async (key: string) => {
     const newPrefs = { ...safetyPrefs, [key]: !safetyPrefs[key] };
     setSafetyPrefs(newPrefs);
+    // Sync to AuthContext so other screens (SOSScreen, HomeScreen) see the update immediately
+    updateUser({ safety_preferences: newPrefs });
     try {
       await profileAPI.updateSafety(newPrefs);
     } catch (error) {
       setSafetyPrefs(safetyPrefs); // revert
+      updateUser({ safety_preferences: safetyPrefs }); // revert AuthContext too
     }
   };
 

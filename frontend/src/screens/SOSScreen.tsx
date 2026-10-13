@@ -70,6 +70,9 @@ export default function SOSScreen({ navigation, route }: any) {
   const [shakeCount, setShakeCount] = useState(0);
   const [capturedPhotosCount, setCapturedPhotosCount] = useState(0);
   const [isHoldingSOS, setIsHoldingSOS] = useState(false);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceCountdown, setVoiceCountdown] = useState(5);
+  const [isUploadingVoice, setIsUploadingVoice] = useState(false);
 
   // Refs & Animations
   const holdAnim = useRef(new Animated.Value(0)).current;
@@ -79,6 +82,7 @@ export default function SOSScreen({ navigation, route }: any) {
   const sosLiveIntervalRef = useRef<any>(null);
   const photoIntervalRef = useRef<any>(null);
   const photoCountRef = useRef(0);
+  const voiceTimerRef = useRef<any>(null);
 
   // Camera & Audio
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -104,24 +108,62 @@ export default function SOSScreen({ navigation, route }: any) {
       requestCameraPermission();
     }
 
-    // Auto-trigger safety protocol if requested by navigation params
-    const autoTrigger = route?.params?.autoTrigger;
-    const triggerType = route?.params?.triggerType || 'button';
-
-    if (autoTrigger) {
-      if (user?.safety_preferences?.sos_auto_activation) {
-        triggerSOS(triggerType);
-      } else {
-        startCountdown(triggerType);
-      }
-    }
-
     return () => {
       Accelerometer.removeAllListeners();
       if (countdownRef.current) clearInterval(countdownRef.current);
       if (photoIntervalRef.current) clearInterval(photoIntervalRef.current);
       if (sosLiveIntervalRef.current) clearInterval(sosLiveIntervalRef.current);
+      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
     };
+  }, []);
+
+  // Auto-trigger workflows when navigated with parameters (autoTrigger, stealth, voice)
+  useEffect(() => {
+    const autoTrigger = route?.params?.autoTrigger;
+    const autoStealth = route?.params?.autoStealth || route?.params?.mode === 'stealth';
+    const autoVoice = route?.params?.autoVoice || route?.params?.mode === 'voice';
+    const triggerType = route?.params?.triggerType || (autoStealth ? 'stealth' : autoVoice ? 'voice_intelligence' : 'button');
+
+    if (autoStealth && phase !== 'active') {
+      navigation.setParams({ autoStealth: undefined, mode: undefined });
+      setIsHiddenMode(true);
+      const timer = setTimeout(() => {
+        triggerStealthSOS();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+
+    if (autoVoice) {
+      // Voice SOS MUST display the regular SOS Screen with Voice Listening Banner
+      setIsHiddenMode(false);
+      navigation.setParams({ autoVoice: undefined, mode: undefined });
+      if (!isVoiceListening) {
+        const timer = setTimeout(() => {
+          handleVoiceSOS();
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+
+    if (autoTrigger && phase === 'idle') {
+      setIsHiddenMode(false);
+      navigation.setParams({ autoTrigger: undefined, triggerType: undefined });
+      const timer = setTimeout(() => {
+        if (user?.safety_preferences?.sos_auto_activation) {
+          triggerSOS(triggerType);
+        } else {
+          startCountdown(triggerType);
+        }
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+
+    // Direct SOS tab navigation (no special mode params):
+    // Ensure normal Emergency SOS screen is displayed unless in active stealth session
+    if (!autoStealth && phase !== 'active') {
+      setIsHiddenMode(false);
+    }
   }, [route?.params]);
 
   // Fetch Location, Reverse Geocode & Nearest Services
@@ -399,12 +441,29 @@ export default function SOSScreen({ navigation, route }: any) {
     }
   };
 
+  // Stealth Mode / Silent SOS Trigger
+  const triggerStealthSOS = async () => {
+    setIsHiddenMode(true);
+    Vibration.cancel();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await triggerSOS('stealth');
+  };
+
   // Main Trigger SOS Logic
   const triggerSOS = async (trigger = 'button') => {
+    const isStealth = trigger === 'stealth' || isHiddenMode;
     setPhase('sending');
     holdAnim.setValue(0);
     setIsHoldingSOS(false);
-    Vibration.vibrate([0, 500, 200, 500]);
+
+    // Silent activation: NO loud vibrations if in stealth mode
+    if (isStealth) {
+      Vibration.cancel();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else {
+      Vibration.vibrate([0, 500, 200, 500]);
+    }
+
     startLiveTracking();
     startRecording();
 
@@ -415,7 +474,7 @@ export default function SOSScreen({ navigation, route }: any) {
         location: location
           ? { latitude: location.latitude, longitude: location.longitude }
           : { latitude: 0, longitude: 0 },
-        message: message || (isHiddenMode ? 'SILENT SOS TRIGGERED' : 'Emergency SOS Alert Activated'),
+        message: message || (isStealth ? 'SILENT SOS TRIGGERED - User in covert duress' : 'Emergency SOS Alert Activated'),
       });
 
       const alertId = res.data?.alert?.id || '';
@@ -448,11 +507,13 @@ export default function SOSScreen({ navigation, route }: any) {
           latitude: location?.latitude || 0,
           longitude: location?.longitude || 0,
         },
-        'high'
+        isStealth ? 'critical' : 'high'
       );
 
       setPhase('active');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (!isStealth) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
 
       // Stop Audio Recording after 6 seconds and run LLM voice analysis
       setTimeout(() => {
@@ -461,7 +522,7 @@ export default function SOSScreen({ navigation, route }: any) {
     } catch (err: any) {
       console.error('SOS Trigger failed', err);
       const primaryContact = contacts.find((c) => c.is_primary) || contacts[0];
-      if (!isHiddenMode && primaryContact?.phone) {
+      if (!isStealth && primaryContact?.phone) {
         Alert.alert(
           'Connection Alert',
           'Backend SOS endpoint reached connection timeout. Triggering direct emergency telephone call to primary contact.',
@@ -475,41 +536,106 @@ export default function SOSScreen({ navigation, route }: any) {
     }
   };
 
-  // Voice SOS Instant Button
+  // Voice SOS Workflow (Hands-free AI Distress Detection)
   const handleVoiceSOS = async () => {
     try {
-      if (isRecording) {
-        setIsRecording(false);
-        await recorder.stop();
-        const uri = recorder.uri;
-        if (!uri) return;
+      setIsHiddenMode(false); // Ensure emergency console is displayed
 
+      if (isVoiceListening) {
+        // User tapped manually to finish speaking early
+        await stopAndUploadVoiceSOS();
+        return;
+      }
+
+      // Permission handling
+      const perm = await requestRecordingPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          'Microphone Permission Required',
+          'SafeHer AI needs microphone access for Voice SOS to detect speech distress and acoustic vocal stress. Please enable microphone permissions in your phone settings.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // 1. EMERGENCY ALERTS MUST NEVER WAIT FOR AI: Fire initial emergency SOS immediately!
+      if (phase !== 'active') {
+        setPhase('active');
+        startLiveTracking();
+        sosAPI.trigger({
+          user_id: user?.id || 'unknown',
+          trigger_type: 'voice_intelligence',
+          location: location ? { latitude: location.latitude, longitude: location.longitude } : { latitude: 0, longitude: 0 },
+          message: 'Voice SOS emergency trigger engaged. Capturing voice distress telemetry...',
+        }).then((res) => {
+          if (res.data?.alert?.id) {
+            setActiveAlertId(res.data.alert.id);
+          }
+        }).catch((e) => console.warn('Instant Voice SOS trigger error:', e));
+
+        emitSOS(
+          { latitude: location?.latitude || 0, longitude: location?.longitude || 0 },
+          'critical'
+        );
+      }
+
+      // 2. Start audio recording
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setIsRecording(true);
+      setIsVoiceListening(true);
+      setVoiceCountdown(5);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+      // 3. Hands-free 5-second countdown timer (automatically stops & uploads)
+      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+      let remaining = 5;
+      voiceTimerRef.current = setInterval(async () => {
+        remaining -= 1;
+        setVoiceCountdown(remaining);
+        if (remaining <= 0) {
+          if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+          await stopAndUploadVoiceSOS();
+        }
+      }, 1000);
+
+    } catch (err) {
+      console.error('Voice SOS error:', err);
+      setIsRecording(false);
+      setIsVoiceListening(false);
+      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+    }
+  };
+
+  const stopAndUploadVoiceSOS = async () => {
+    if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+    setIsVoiceListening(false);
+    setIsRecording(false);
+    setIsUploadingVoice(true);
+
+    try {
+      await recorder.stop();
+      const uri = recorder.uri;
+      if (uri) {
         const formData = new FormData();
         const filename = uri.split('/').pop() || 'voice_sos.m4a';
         formData.append('audio', { uri, name: filename, type: 'audio/m4a' } as any);
         formData.append('user_id', user?.id || '');
         formData.append('latitude', location?.latitude?.toString() || '0');
         formData.append('longitude', location?.longitude?.toString() || '0');
+        if (activeAlertId) formData.append('alert_id', activeAlertId);
 
         const res = await sosAPI.triggerWithVoice(formData);
         if (res.data?.intelligence) {
           setAiIntelResult(res.data.intelligence);
         }
-        setPhase('active');
-        startLiveTracking();
-        Alert.alert('Voice SOS Processed', 'AI Voice analysis complete. Emergency alert active.');
-      } else {
-        const perm = await requestRecordingPermissionsAsync();
-        if (!perm.granted) return;
-        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-        await recorder.prepareToRecordAsync();
-        recorder.record();
-        setIsRecording(true);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-    } catch (err) {
-      console.error('Voice SOS error', err);
-      setIsRecording(false);
+    } catch (err: any) {
+      console.error('Voice SOS upload failed:', err);
+    } finally {
+      setIsUploadingVoice(false);
     }
   };
 
@@ -525,6 +651,7 @@ export default function SOSScreen({ navigation, route }: any) {
           style: 'destructive',
           onPress: async () => {
             setPhase('idle');
+            setIsHiddenMode(false);
             setMessage('');
             setAiIntelResult(null);
             setCapturedPhotosCount(0);
@@ -584,7 +711,16 @@ export default function SOSScreen({ navigation, route }: any) {
 
       {/* Header Bar */}
       <View style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={s.backBtn}
+          onPress={() => {
+            if (isHiddenMode) {
+              setIsHiddenMode(false);
+            } else {
+              navigation.goBack();
+            }
+          }}
+        >
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
@@ -619,13 +755,147 @@ export default function SOSScreen({ navigation, route }: any) {
       </View>
 
       <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Shake Banner Alert */}
-        {shakeCount > 0 && !isHiddenMode && (
-          <View style={s.shakeBanner}>
-            <Ionicons name="phone-portrait" size={18} color="#F59E0B" />
-            <Text style={s.shakeText}> Shake detected ({shakeCount}/3)... Triggering SOS soon!</Text>
+        {/* ━━ STEALTH DISGUISED INTERFACE (SHOWN WHEN isHiddenMode === true) ━━━━ */}
+        {isHiddenMode ? (
+          <View style={s.stealthContainer}>
+            <View style={s.stealthHeaderCard}>
+              <View style={s.stealthHeaderLeft}>
+                <Ionicons name="hardware-chip-outline" size={24} color="#38BDF8" />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.stealthTitle}>Device Diagnostics & Power Utility</Text>
+                  <Text style={s.stealthSub}>Kernel Monitor v4.19 • Background Telemetry</Text>
+                </View>
+              </View>
+              <View style={s.stealthStatusBadge}>
+                <View style={s.stealthDot} />
+                <Text style={s.stealthStatusText}>OPTIMAL</Text>
+              </View>
+            </View>
+
+            {/* Battery Health Diagnostic */}
+            <View style={s.stealthCard}>
+              <View style={s.stealthCardTitleRow}>
+                <Ionicons name="battery-charging" size={18} color="#10B981" />
+                <Text style={s.stealthCardTitle}>Battery & Thermal Health</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>Remaining Capacity</Text>
+                <Text style={s.stealthVal}>88% (Healthy)</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>Cell Core Temperature</Text>
+                <Text style={s.stealthVal}>33.1°C (Nominal)</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>Charging State</Text>
+                <Text style={s.stealthVal}>Discharging (14h 20m est.)</Text>
+              </View>
+            </View>
+
+            {/* Hardware & CPU Performance */}
+            <View style={s.stealthCard}>
+              <View style={s.stealthCardTitleRow}>
+                <Ionicons name="speedometer-outline" size={18} color="#6366F1" />
+                <Text style={s.stealthCardTitle}>Memory & Processor Utilization</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>CPU Allocation</Text>
+                <Text style={s.stealthVal}>11.8% (Nominal)</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>RAM Utilization</Text>
+                <Text style={s.stealthVal}>3.7 GB / 8.0 GB Used</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>Storage Available</Text>
+                <Text style={s.stealthVal}>64.2 GB Free / 128 GB</Text>
+              </View>
+            </View>
+
+            {/* Network & Connectivity Diagnostic */}
+            <View style={s.stealthCard}>
+              <View style={s.stealthCardTitleRow}>
+                <Ionicons name="radio-outline" size={18} color="#F59E0B" />
+                <Text style={s.stealthCardTitle}>Network Connectivity & Sensors</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>Connection Standard</Text>
+                <Text style={s.stealthVal}>4G LTE / Wi-Fi Active</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>GNSS Position Lock</Text>
+                <Text style={s.stealthVal}>High-Accuracy Fixed (5m)</Text>
+              </View>
+              <View style={s.stealthRow}>
+                <Text style={s.stealthLabel}>Encrypted Background Sync</Text>
+                <Text style={s.stealthVal}>Active (TLS 1.3)</Text>
+              </View>
+            </View>
+
+            {/* Secret Gestures / Action Controls */}
+            <View style={s.stealthActionRow}>
+              <TouchableOpacity 
+                style={[s.stealthRevealBtn, { borderColor: '#38BDF870', backgroundColor: '#0284C725' }]}
+                onPress={() => {
+                  setIsHiddenMode(false);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }}
+              >
+                <Ionicons name="eye-outline" size={18} color="#38BDF8" />
+                <Text style={[s.stealthRevealText, { color: '#38BDF8', fontWeight: '800' }]}>
+                  Exit Stealth Mode • Return to SOS Console
+                </Text>
+              </TouchableOpacity>
+
+              {phase === 'active' && (
+                <TouchableOpacity 
+                  style={s.stealthResolveBtn}
+                  onPress={handleResolveSOS}
+                >
+                  <Ionicons name="shield-checkmark" size={18} color="#10B981" />
+                  <Text style={s.stealthResolveText}>I Am Safe / Terminate Alert</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-        )}
+        ) : (
+          <>
+            {/* Shake Banner Alert */}
+            {shakeCount > 0 && (
+              <View style={s.shakeBanner}>
+                <Ionicons name="phone-portrait" size={18} color="#F59E0B" />
+                <Text style={s.shakeText}> Shake detected ({shakeCount}/3)... Triggering SOS soon!</Text>
+              </View>
+            )}
+
+            {/* VOICE SOS LISTENING ACTIVE BANNER */}
+            {isVoiceListening && (
+              <View style={s.voiceListeningBanner}>
+                <View style={s.voiceListeningHeader}>
+                  <View style={s.voicePulseRing}>
+                    <Ionicons name="mic" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={s.voiceListeningTitle}>🎙️ AI Voice Distress Listening...</Text>
+                    <Text style={s.voiceListeningSub}>Speak your emergency situation or call for help</Text>
+                  </View>
+                </View>
+                <View style={s.voiceTimerRow}>
+                  <Text style={s.voiceTimerText}>Auto-analyzing in <Text style={{ color: '#EF4444', fontWeight: '900' }}>{voiceCountdown}s</Text></Text>
+                  <TouchableOpacity style={s.voiceStopBtn} onPress={stopAndUploadVoiceSOS}>
+                    <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                    <Text style={s.voiceStopBtnText}>Analyze Now</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {isUploadingVoice && (
+              <View style={s.voiceUploadingCard}>
+                <Ionicons name="sparkles" size={20} color="#8B5CF6" />
+                <Text style={s.voiceUploadingText}>Running Whisper STT & Librosa Acoustic Stress Analysis...</Text>
+              </View>
+            )}
 
         {/* ━━ PRE-ACTIVATION / IDLE / COUNTDOWN SCREEN ━━━━ */}
         {phase !== 'active' && (
@@ -739,35 +1009,48 @@ export default function SOSScreen({ navigation, route }: any) {
             {/* 3. VOICE SOS & QUICK ACTIONS */}
             <View style={s.quickActionsRow}>
               <TouchableOpacity
-                style={[s.actionCard, isRecording && s.actionCardActive]}
+                style={[s.actionCard, (isRecording || isVoiceListening) && s.actionCardActive]}
                 onPress={handleVoiceSOS}
               >
-                <View style={[s.actionIconBox, isRecording && { backgroundColor: Colors.danger }]}>
-                  <Ionicons name={isRecording ? 'stop-circle' : 'mic'} size={24} color="#fff" />
+                <View style={[s.actionIconBox, (isRecording || isVoiceListening) && { backgroundColor: Colors.danger }]}>
+                  <Ionicons name={(isRecording || isVoiceListening) ? 'stop-circle' : 'mic'} size={24} color="#fff" />
                 </View>
                 <View style={s.actionTextGroup}>
-                  <Text style={[s.actionTitle, isRecording && { color: Colors.danger }]}>
-                    {isRecording ? 'Listening...' : 'Voice SOS'}
+                  <Text style={[s.actionTitle, (isRecording || isVoiceListening) && { color: Colors.danger }]}>
+                    {isVoiceListening ? `Listening (${voiceCountdown}s)` : isRecording ? 'Analyzing...' : 'Voice SOS'}
                   </Text>
                   <Text style={s.actionSub}>
-                    {isRecording ? 'Analyzing audio...' : 'Hands-free AI voice'}
+                    {isVoiceListening ? 'Tap to send now' : 'Hands-free AI voice'}
                   </Text>
                 </View>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={s.actionCard}
-                onPress={() => Linking.openURL('tel:112')}
+                onPress={triggerStealthSOS}
               >
-                <View style={[s.actionIconBox, { backgroundColor: '#2563EB' }]}>
-                  <Ionicons name="call" size={24} color="#fff" />
+                <View style={[s.actionIconBox, { backgroundColor: '#475569' }]}>
+                  <Ionicons name="eye-off" size={24} color="#fff" />
                 </View>
                 <View style={s.actionTextGroup}>
-                  <Text style={s.actionTitle}>Call 112 / Police</Text>
-                  <Text style={s.actionSub}>Direct Police Line</Text>
+                  <Text style={s.actionTitle}>Stealth SOS</Text>
+                  <Text style={s.actionSub}>Silent disguise mode</Text>
                 </View>
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              style={[s.actionCard, { marginBottom: Spacing.md }]}
+              onPress={() => Linking.openURL('tel:112')}
+            >
+              <View style={[s.actionIconBox, { backgroundColor: '#2563EB' }]}>
+                <Ionicons name="call" size={24} color="#fff" />
+              </View>
+              <View style={s.actionTextGroup}>
+                <Text style={s.actionTitle}>Call 112 / Police Emergency</Text>
+                <Text style={s.actionSub}>Direct National Police Dispatch Helpline</Text>
+              </View>
+            </TouchableOpacity>
 
             {/* Optional Distress Message */}
             <View style={s.messageCard}>
@@ -887,20 +1170,26 @@ export default function SOSScreen({ navigation, route }: any) {
               <View style={s.mapContainer}>
                 <MapView
                   style={s.miniMap}
+                  mapType={Platform.OS === 'android' ? 'none' : 'standard'}
                   initialRegion={{
                     latitude: location.latitude,
                     longitude: location.longitude,
                     latitudeDelta: 0.012,
                     longitudeDelta: 0.012,
                   }}
-                  showsUserLocation
+                  showsUserLocation={Platform.OS === 'ios'}
                   showsMyLocationButton={false}
+                  scrollEnabled={false}
+                  zoomEnabled={false}
                 >
                   <UrlTile
-                    urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
+                    urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
                     maximumZ={19}
+                    minimumZ={1}
                     flipY={false}
                     tileSize={256}
+                    zIndex={1}
+                    shouldReplaceMapContent={Platform.OS === 'ios'}
                   />
                   <Marker
                     coordinate={{ latitude: location.latitude, longitude: location.longitude }}
@@ -1036,6 +1325,8 @@ export default function SOSScreen({ navigation, route }: any) {
               <Ionicons name="shield-checkmark" size={24} color="#fff" />
               <Text style={s.resolveBtnText}>I'M SAFE / RESOLVE SOS</Text>
             </TouchableOpacity>
+          </>
+        )}
           </>
         )}
       </ScrollView>
@@ -1685,6 +1976,212 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     letterSpacing: 0.5,
+  },
+
+  // ━━ STEALTH DISGUISED UI STYLES ━━━━
+  stealthContainer: {
+    paddingVertical: Spacing.xs,
+  },
+  stealthHeaderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1e293b',
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: Spacing.lg,
+  },
+  stealthHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  stealthTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  stealthSub: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  stealthStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#10B98120',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: '#10B98150',
+  },
+  stealthDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  stealthStatusText: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  stealthCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: Spacing.md,
+  },
+  stealthCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#33415560',
+    paddingBottom: 8,
+  },
+  stealthCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  stealthRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  stealthLabel: {
+    fontSize: 12,
+    color: '#94a3b8',
+    fontWeight: '600',
+  },
+  stealthVal: {
+    fontSize: 12,
+    color: '#e2e8f0',
+    fontWeight: '700',
+  },
+  stealthActionRow: {
+    marginTop: Spacing.md,
+    gap: 10,
+  },
+  stealthRevealBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#33415550',
+    paddingVertical: 14,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  stealthRevealText: {
+    fontSize: 12,
+    color: '#94a3b8',
+    fontWeight: '700',
+  },
+  stealthResolveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#10B98125',
+    paddingVertical: 14,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: '#10B98160',
+  },
+  stealthResolveText: {
+    fontSize: 13,
+    color: '#10B981',
+    fontWeight: '800',
+  },
+
+  // ━━ VOICE SOS LISTENING UI STYLES ━━━━
+  voiceListeningBanner: {
+    backgroundColor: '#DC262620',
+    borderWidth: 1.5,
+    borderColor: '#DC2626',
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  voiceListeningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  voicePulseRing: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceListeningTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  voiceListeningSub: {
+    fontSize: 11,
+    color: '#cbd5e1',
+    marginTop: 2,
+  },
+  voiceTimerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.md,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: '#DC262640',
+  },
+  voiceTimerText: {
+    fontSize: 13,
+    color: '#fff',
+    fontWeight: '700',
+  },
+  voiceStopBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.md,
+  },
+  voiceStopBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  voiceUploadingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#8B5CF620',
+    borderWidth: 1,
+    borderColor: '#8B5CF660',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  voiceUploadingText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#C4B5FD',
+    fontWeight: '700',
   },
 });
 

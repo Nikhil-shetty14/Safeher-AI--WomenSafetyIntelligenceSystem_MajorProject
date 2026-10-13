@@ -32,6 +32,7 @@ import AIIntelligenceScreen from '../screens/AIIntelligenceScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 
+
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -41,9 +42,9 @@ const TabNavigator = () => (
       headerShown: false,
       tabBarHideOnKeyboard: true,
       // CRITICAL: Keep screens mounted when switching tabs
-      // This prevents MapView from being destroyed and re-created (causing black flash)
+      // unmountOnBlur: false keeps MapView alive, freezeOnBlur: false prevents OpenGL context teardown
       unmountOnBlur: false,
-      freezeOnBlur: true,
+      freezeOnBlur: false,
       lazy: true,
       tabBarStyle: {
         backgroundColor: Colors.backgroundSecondary,
@@ -73,6 +74,11 @@ const TabNavigator = () => (
     <Tab.Screen
       name="SOS"
       component={SOSScreen}
+      listeners={({ navigation }) => ({
+        tabPress: () => {
+          navigation.setParams({ mode: undefined, autoStealth: undefined, autoVoice: undefined, autoTrigger: undefined });
+        },
+      })}
       options={{
         tabBarIcon: ({ focused }) => (
           <View style={{

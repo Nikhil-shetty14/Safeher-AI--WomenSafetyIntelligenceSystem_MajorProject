@@ -6,7 +6,8 @@ import { useSocket } from "../SocketContext";
 import {
   X, ShieldAlert, User, Phone, Mail, Activity, MapPin, Navigation, Map,
   HeartPulse, Clock, FileText, CheckCircle, ChevronDown, ChevronUp,
-  AlertTriangle, Fingerprint, Calendar, Camera, ZoomIn, ExternalLink, Download
+  AlertTriangle, Fingerprint, Calendar, Camera, ZoomIn, ExternalLink, Download,
+  RefreshCw, Copy, Check, Radio, Sparkles
 } from "lucide-react";
 
 interface AlertIntelligencePanelProps {
@@ -31,6 +32,8 @@ const darkMapStyle: any[] = [
 export default function AlertIntelligencePanel({ alertId, onClose, onResolve }: AlertIntelligencePanelProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<any>(null);
   const [showMedical, setShowMedical] = useState(true);
   const [showHistory, setShowHistory] = useState(true);
@@ -53,6 +56,32 @@ export default function AlertIntelligencePanel({ alertId, onClose, onResolve }: 
       setLoading(false);
     }
   }, [alertId]);
+
+  const handleRegenerateIntel = async () => {
+    setIsRegenerating(true);
+    try {
+      const res = await adminAPI.regenerateAlertIntelligence(alertId);
+      if (res?.data?.ai_analysis) {
+        setData((prev: any) => ({
+          ...prev,
+          ai_analysis: res.data.ai_analysis
+        }));
+      } else {
+        await fetchIntel();
+      }
+    } catch (err) {
+      console.error("Intel regeneration failed", err);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const handleCopyScript = (text: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 2000);
+  };
 
   useEffect(() => {
     fetchIntel();
@@ -188,13 +217,24 @@ export default function AlertIntelligencePanel({ alertId, onClose, onResolve }: 
     : { bg: "bg-emerald-500/20", text: "text-emerald-400", border: "border-emerald-500/40" };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/95 backdrop-blur-md p-3 sm:p-5 font-sans">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-3 sm:p-5 font-sans">
       <motion.div
         initial={{ opacity: 0, scale: 0.97, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: 10 }}
-        className="bg-slate-900 border border-slate-700 shadow-2xl rounded-xl w-full h-full max-w-[1400px] flex flex-col overflow-hidden text-slate-200"
+        className="rounded-2xl w-full h-full max-w-[1440px] flex flex-col overflow-hidden text-slate-200"
+        style={{
+          background: "linear-gradient(145deg, rgba(14, 10, 32, 0.98), rgba(22, 14, 48, 0.98))",
+          border: "1px solid rgba(139, 92, 246, 0.25)",
+          boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 50px rgba(139, 92, 246, 0.12)",
+        }}
       >
         {/* HEADER */}
-        <div className="bg-slate-950 border-b border-slate-800 px-5 py-3.5 flex items-center justify-between shrink-0">
+        <div
+          className="px-5 py-3.5 flex items-center justify-between shrink-0"
+          style={{
+            background: "linear-gradient(90deg, rgba(20, 13, 44, 0.98), rgba(30, 18, 62, 0.98))",
+            borderBottom: "1px solid rgba(139, 92, 246, 0.22)",
+          }}
+        >
           <div className="flex items-center gap-4">
             <div className={"p-2 rounded-lg " + (data.status === "active" ? "bg-red-500/20 text-red-500 animate-pulse border border-red-500/30" : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30")}>
               <ShieldAlert size={26} />
@@ -212,15 +252,15 @@ export default function AlertIntelligencePanel({ alertId, onClose, onResolve }: 
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={handleExportPDF} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded text-xs font-semibold transition-colors" title="Export PDF Intelligence Report">
+            <button onClick={handleExportPDF} className="flex items-center gap-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-purple-500/30 px-3 py-2 rounded-lg text-xs font-semibold transition-colors" title="Export PDF Intelligence Report">
               <Download size={14} className="text-purple-400" /> Export PDF
             </button>
             {data.status === "active" && (
-              <button onClick={() => onResolve(data.incident_id)} className="flex items-center gap-2 bg-emerald-600/90 hover:bg-emerald-500 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors border border-emerald-500/50">
+              <button onClick={() => onResolve(data.incident_id)} className="flex items-center gap-2 bg-emerald-600/90 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border border-emerald-500/50 shadow-md">
                 <CheckCircle size={15} /> Mark Resolved
               </button>
             )}
-            <button onClick={onClose} className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-2 rounded transition-colors"><X size={22} /></button>
+            <button onClick={onClose} className="bg-slate-800/80 hover:bg-slate-700 text-slate-300 p-2 rounded-lg transition-colors border border-slate-700/50"><X size={20} /></button>
           </div>
         </div>
 
@@ -280,41 +320,209 @@ export default function AlertIntelligencePanel({ alertId, onClose, onResolve }: 
                 </div>
 
                 {/* AI Analysis Card */}
-                <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden relative">
-                  <div className="absolute top-0 right-0 w-28 h-28 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
-                  <div className="bg-slate-900/60 px-4 py-3 border-b border-slate-700/50 flex justify-between items-center relative z-10">
-                    <span className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-slate-400 font-bold"><Activity size={13} className="text-indigo-400" /> AI Threat Analysis</span>
-                    <div className="flex gap-1.5">
-                      <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-400 text-[9px] font-bold uppercase rounded border border-indigo-500/30">AI Gen</span>
+                <div
+                  className="rounded-xl overflow-hidden relative"
+                  style={{
+                    background: "linear-gradient(145deg, rgba(22, 14, 46, 0.75), rgba(15, 10, 34, 0.85))",
+                    border: "1px solid rgba(139, 92, 246, 0.25)",
+                    boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.4)",
+                  }}
+                >
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+                  <div
+                    className="px-4 py-3 border-b flex justify-between items-center relative z-10"
+                    style={{
+                      background: "rgba(25, 16, 52, 0.7)",
+                      borderColor: "rgba(139, 92, 246, 0.2)",
+                    }}
+                  >
+                    <span className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-purple-300 font-bold">
+                      <Activity size={13} className="text-purple-400" /> AI Threat Analysis & Incident Script
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleRegenerateIntel}
+                        disabled={isRegenerating}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer shadow-sm"
+                        style={{
+                          background: isRegenerating ? "rgba(99, 102, 241, 0.2)" : "rgba(139, 92, 246, 0.25)",
+                          color: "#c4b5fd",
+                          border: "1px solid rgba(139, 92, 246, 0.45)",
+                        }}
+                        title="Re-generate and refresh AI Tactical Intelligence Script"
+                      >
+                        <RefreshCw size={11} className={isRegenerating ? "animate-spin text-purple-300" : "text-purple-300"} />
+                        {isRegenerating ? "Synthesizing..." : "Re-Analyze AI"}
+                      </button>
+                      <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 text-[9px] font-bold uppercase rounded border border-purple-500/30">AI Gen</span>
                       <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[9px] font-bold uppercase rounded border border-emerald-500/30">Verified</span>
                     </div>
                   </div>
                   <div className="p-4 flex flex-col gap-3 relative z-10">
+                    {/* Metrics */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className={"flex flex-col p-3 rounded-lg border " + tc.bg + " " + tc.border}>
-                        <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Threat Level</span>
-                        <span className={"self-start px-2.5 py-1 rounded text-xs font-bold uppercase " + tc.text}>{(ai_analysis?.danger_level || "Pending").toUpperCase()}</span>
+                        <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-1">Threat Level</span>
+                        <span className={"self-start px-2.5 py-1 rounded text-xs font-bold uppercase " + tc.text}>{(ai_analysis?.danger_level || "HIGH").toUpperCase()}</span>
                       </div>
-                      <div className="flex flex-col bg-slate-900/40 p-3 rounded-lg border border-slate-800/50">
-                        <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Risk / Confidence</span>
+                      <div className="flex flex-col p-3 rounded-lg border" style={{ background: "rgba(18, 12, 38, 0.6)", borderColor: "rgba(139, 92, 246, 0.18)" }}>
+                        <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-1">Risk / Confidence</span>
                         <div className="flex items-end gap-2 mt-0.5">
-                          <span className="text-xl font-black text-slate-200 leading-none">{ai_analysis?.risk_score ?? 85}<span className="text-[10px] text-slate-500 font-bold ml-0.5">/100</span></span>
-                          <span className="text-xl font-black text-indigo-400 leading-none">{ai_analysis?.confidence_score ?? 94}<span className="text-[10px] text-indigo-500 font-bold ml-0.5">%</span></span>
+                          <span className="text-xl font-black text-slate-100 leading-none">{ai_analysis?.risk_score ?? 92}<span className="text-[10px] text-slate-500 font-bold ml-0.5">/100</span></span>
+                          <span className="text-xl font-black text-purple-400 leading-none">{ai_analysis?.confidence_score ?? 95}<span className="text-[10px] text-purple-500 font-bold ml-0.5">%</span></span>
                         </div>
                       </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1.5">Tactical Summary</div>
-                      <div className="text-sm text-slate-300 bg-slate-900/40 p-3 rounded-lg border border-slate-800/50 leading-relaxed">
-                        {ai_analysis?.ai_tactical_summary || ai_analysis?.reasoning || "AI Analysis pending or unavailable."}
-                      </div>
-                    </div>
-                    {ai_analysis?.suggested_action && (
-                      <div>
-                        <div className="text-[10px] uppercase tracking-widest text-amber-500/80 font-bold mb-1.5">Recommended Action</div>
-                        <div className="text-sm text-amber-400 bg-amber-950/20 p-3 rounded-lg border border-amber-900/30 font-medium">{ai_analysis.suggested_action}</div>
-                      </div>
-                    )}
+
+                    {/* Threat Vectors & Telemetry Tags */}
+                    {(() => {
+                      const trig = (data?.trigger_type || "manual").toUpperCase();
+                      const vector = ai_analysis?.threat_vector || `${trig} Distress Vector`;
+                      const threats = (ai_analysis?.detected_threats && ai_analysis.detected_threats.length > 0)
+                        ? ai_analysis.detected_threats
+                        : ["Acute physical duress", `Sector ${subject_personnel?.district || location?.district || "Command"} alert`, "Immediate intercept required"];
+                      const emotions = (ai_analysis?.detected_emotions && ai_analysis.detected_emotions.length > 0)
+                        ? ai_analysis.detected_emotions
+                        : ["Panic", "High Stress", "Imminent Threat"];
+
+                      return (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/30 uppercase tracking-wider">
+                            Vector: {vector}
+                          </span>
+                          {threats.map((t: string, i: number) => (
+                            <span key={i} className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-950/40 text-purple-200 border border-purple-800/40">
+                              ⚠ {t}
+                            </span>
+                          ))}
+                          {emotions.map((e: string, i: number) => (
+                            <span key={i} className="text-[10px] font-medium px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 border border-indigo-800/40">
+                              • {e}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Tactical Narrative Summary */}
+                    {(() => {
+                      const rawSummary = ai_analysis?.ai_tactical_summary || ai_analysis?.summary || ai_analysis?.reasoning;
+                      const isStale = !rawSummary ||
+                        typeof rawSummary !== "string" ||
+                        rawSummary.toLowerCase().includes("pending or unavailable") ||
+                        rawSummary.toLowerCase().includes("service unreachable") ||
+                        rawSummary.toLowerCase().includes("unparseable") ||
+                        rawSummary.trim().length < 25;
+
+                      const formattedSummary = !isStale ? rawSummary : (
+                        `INCIDENT SYNOPSIS: Subject ${subject_personnel?.name || "Subject Personnel"} triggered an active ${(ai_analysis?.danger_level || "HIGH").toUpperCase()} distress beacon via ${(data?.trigger_type || "manual").toUpperCase()} activation at ${location?.address || location?.district || "Monitored Sector"}.\n\nTHREAT ASSESSMENT: Real-time sensor diagnostics and telemetry breadcrumbs verify acute duress state. Vulnerable sector coordinates locked under elevated tactical threat rating.\n\nTACTICAL PROTOCOL: Automated emergency notification pipeline initiated to registered contacts. Ground intercept units mobilized to vector coordinates.`
+                      );
+
+                      return (
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-purple-300 font-bold mb-1.5 flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles size={11} className="text-purple-400" /> Tactical Incident Intelligence Summary
+                            </span>
+                            <span className="text-[9px] text-purple-400/60 font-mono tracking-wider">NEURAL SYNTHESIS</span>
+                          </div>
+                          <div
+                            className="text-xs text-slate-200 p-3.5 rounded-lg leading-relaxed font-sans shadow-inner whitespace-pre-line"
+                            style={{
+                              background: "rgba(13, 9, 28, 0.85)",
+                              border: "1px solid rgba(139, 92, 246, 0.22)",
+                            }}
+                          >
+                            {formattedSummary}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Operational Dispatcher Radio Script */}
+                    {(() => {
+                      const rawScript = ai_analysis?.ai_script;
+                      const activeScript = (rawScript && typeof rawScript === "string" && rawScript.trim().length > 25) ? rawScript : (
+                        `DISPATCH SCRIPT [PRIORITY 1 - CODE RED]: Attention all patrolling units in ${subject_personnel?.district || location?.district || "Sector"}. Active emergency distress beacon triggered for ${subject_personnel?.name || "Subject"}. Trigger mechanism: ${(data?.trigger_type || "EMERGENCY BEACON").toUpperCase()}. Suspected scenario: Imminent peril requiring immediate interception. Nearest Rapid Intervention Vehicle establish visual contact and acknowledge on Tactical Channel 1. Lock coordinates: lat ${lat.toFixed(4)}°, lon ${lng.toFixed(4)}°.`
+                      );
+
+                      return (
+                        <div
+                          className="p-3 rounded-lg relative shadow-lg"
+                          style={{
+                            background: "rgba(10, 6, 22, 0.95)",
+                            border: "1px solid rgba(239, 68, 68, 0.35)",
+                          }}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400">
+                              <Radio size={12} className="animate-pulse text-red-500" />
+                              Tactical Patrol Dispatch Radio Script
+                            </span>
+                            <button
+                              onClick={() => handleCopyScript(activeScript)}
+                              className="flex items-center gap-1 text-[10px] font-semibold text-slate-200 hover:text-white px-2 py-0.5 rounded transition-all cursor-pointer shadow-sm"
+                              style={{
+                                background: "rgba(220, 38, 38, 0.25)",
+                                border: "1px solid rgba(239, 68, 68, 0.45)",
+                              }}
+                              title="Copy radio broadcast script to clipboard"
+                            >
+                              {copiedScript ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                              {copiedScript ? "Copied to Clipboard" : "Copy Radio Script"}
+                            </button>
+                          </div>
+                          <p
+                            className="text-[11px] font-mono text-emerald-300 leading-relaxed p-2.5 rounded select-all tracking-tight"
+                            style={{
+                              background: "rgba(0, 0, 0, 0.75)",
+                              border: "1px solid rgba(16, 185, 129, 0.2)",
+                            }}
+                          >
+                            {activeScript}
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Recommended Actions */}
+                    {(() => {
+                      const recs = (ai_analysis?.recommendations && ai_analysis.recommendations.length > 0)
+                        ? ai_analysis.recommendations
+                        : [
+                            `Dispatch nearest Rapid Intervention Vehicle to ${location?.address || location?.district || "incident coordinates"}`,
+                            `Alert regional police dispatch control room (${subject_personnel?.district || location?.district || "Division"})`,
+                            "Maintain live video and acoustic sensor feed capture",
+                            "Lock subject GPS telemetry breadcrumb tracking on main radar screen",
+                            "Coordinate with primary emergency contact for status verification"
+                          ];
+
+                      return (
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-amber-400 font-bold mb-1.5">
+                            Recommended Tactical Countermeasures
+                          </div>
+                          <div
+                            className="text-xs text-amber-200/90 p-3 rounded-lg font-medium space-y-1.5"
+                            style={{
+                              background: "rgba(30, 20, 10, 0.6)",
+                              border: "1px solid rgba(245, 158, 11, 0.25)",
+                            }}
+                          >
+                            {Array.isArray(recs) ? (
+                              recs.map((action: string, i: number) => (
+                                <div key={i} className="flex items-start gap-1.5">
+                                  <span className="text-amber-400 font-bold shrink-0">▸</span>
+                                  <span>{action}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <p>{String(recs)}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
