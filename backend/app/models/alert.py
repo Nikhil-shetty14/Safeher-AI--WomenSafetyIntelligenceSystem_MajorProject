@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List, Any
 from datetime import datetime
 from enum import Enum
 
@@ -22,9 +22,17 @@ class LocationData(BaseModel):
     longitude: float
     accuracy: Optional[float] = None
     address: Optional[str] = None
+    formatted_address: Optional[str] = None
     district: Optional[str] = None
     division: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: Optional[Any] = Field(default_factory=datetime.utcnow)
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def normalize_address(cls, v):
+        if isinstance(v, dict):
+            return v.get("formatted_address") or v.get("display_name") or str(v)
+        return v
 
 
 class SOSAlertCreate(BaseModel):
@@ -38,6 +46,9 @@ class SOSAlertCreate(BaseModel):
 class SOSAlertResponse(BaseModel):
     id: str
     user_id: str
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    user_phone: Optional[str] = None
     trigger_type: str
     severity: AlertSeverity
     status: AlertStatus

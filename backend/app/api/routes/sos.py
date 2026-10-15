@@ -32,23 +32,30 @@ async def trigger_sos(
         logger.info(f"SOS TRIGGERED | User: {current_user.get('name')} ({current_user.get('_id')}) | Type: {alert_data.trigger_type}")
         alert_data.user_id = current_user["_id"]
 
-        # Duplicate Prevention: If an active SOS alert already exists for this user, return it
+        # Duplicate Prevention & Alert Lifecycle:
+        # If an active alert exists from an earlier trigger (>5s ago), resolve it so this is a fresh emergency incident.
+        # If triggered within 5s (rapid double-tap debounce), reuse and update the active incident.
         alerts_col = get_collection("alerts")
+        from datetime import datetime
+        now_dt = datetime.utcnow()
+
         if alerts_col is not None:
             existing_active = await alerts_col.find_one(
                 {"user_id": current_user["_id"], "status": "active"},
                 sort=[("created_at", -1)]
             )
             if existing_active:
-                logger.info(f"Active SOS already exists for user {current_user.get('name')}: {existing_active['_id']}. Reusing active incident.")
-                alert_doc = await format_alert_response(existing_active)
-                return {
-                    "success": True,
-                    "message": "Emergency SOS already active",
-                    "ai_fallback_used": False,
-                    "sms_status": "already_active",
-                    "alert": alert_doc
-                }
+                created_at = existing_active.get("created_at")
+                age_sec = (now_dt - created_at).total_seconds() if isinstance(created_at, datetime) else 999
+                if age_sec < 5:
+                    logger.info(f"Rapid SOS trigger (<5s) for user {current_user.get('name')}: updating active incident {existing_active['_id']}")
+                    alert = existing_active
+                else:
+                    logger.info(f"Resolving older active SOS {existing_active['_id']} ({age_sec:.0f}s old) to create fresh emergency incident")
+                    await alerts_col.update_one(
+                        {"_id": existing_active["_id"]},
+                        {"$set": {"status": "resolved", "resolved_at": now_dt, "resolution_note": "Superseded by new emergency trigger"}}
+                    )
 
         # Quick AI analysis / deterministic synthesis
         ai_analysis = None
@@ -90,13 +97,14 @@ async def trigger_sos(
 
         # Format location safely for JSON/Socket.IO serialization
         try:
-            from datetime import datetime
             loc = alert["location"]
             timestamp = loc.get("timestamp")
             if isinstance(timestamp, datetime):
                 timestamp = timestamp.isoformat()
             elif timestamp:
                 timestamp = str(timestamp)
+            else:
+                timestamp = now_dt.isoformat()
                 
             location_payload = {
                 "latitude": loc["latitude"],
@@ -109,11 +117,13 @@ async def trigger_sos(
             }
 
             # Broadcast via WebSocket to admins
-            await broadcast_to_admins("new_sos_alert", {
+            admin_payload = {
                 "alert_id": alert["_id"],
+                "id": alert["_id"],
+                "_id": alert["_id"],
                 "user_id": alert["user_id"],
-                "user_name": current_user.get("name"),
-                "user_phone": current_user.get("phone"),
+                "user_name": current_user.get("name") or "Emergency User",
+                "user_phone": current_user.get("phone") or "N/A",
                 "severity": alert["severity"],
                 "location": location_payload,
                 "trigger_type": alert.get("trigger_type", "button"),
@@ -121,7 +131,9 @@ async def trigger_sos(
                 "status": "active",
                 "acknowledged": False,
                 "created_at": timestamp,
-            })
+            }
+            await broadcast_to_admins("new_sos_alert", admin_payload)
+            logger.info(f"Broadcasted new_sos_alert to admins for alert {alert['_id']}")
 
             # Broadcast Tactical Intelligence Update
             if ai_analysis:
@@ -140,7 +152,8 @@ async def trigger_sos(
                 
                 await broadcast_to_admins("tactical_intel_update", {
                     "alert_id": alert["_id"],
-                    "user_name": current_user.get("name"),
+                    "id": alert["_id"],
+                    "user_name": current_user.get("name") or "Emergency User",
                     "transcript": message_to_analyze,
                     "intelligence": intelligence,
                     "timestamp": timestamp
@@ -266,12 +279,23 @@ async def trigger_sos_with_voice(
                 sort=[("created_at", -1)]
             )
             if existing_active:
-                alert = existing_active
-                logger.info(f"Attaching voice evidence to existing active alert: {alert['_id']}")
-                await alerts_col.update_one(
-                    {"_id": alert["_id"]},
-                    {"$set": {"audio_file_path": audio_path}}
-                )
+                created_at = existing_active.get("created_at")
+                from datetime import datetime
+                now_dt = datetime.utcnow()
+                age_sec = (now_dt - created_at).total_seconds() if isinstance(created_at, datetime) else 999
+                if age_sec < 300:
+                    alert = existing_active
+                    logger.info(f"Attaching voice evidence to active alert: {alert['_id']}")
+                    await alerts_col.update_one(
+                        {"_id": alert["_id"]},
+                        {"$set": {"audio_file_path": audio_path, "trigger_type": "voice_intelligence"}}
+                    )
+                else:
+                    logger.info(f"Resolving stale active alert {existing_active['_id']} ({age_sec:.0f}s old) for fresh voice SOS")
+                    await alerts_col.update_one(
+                        {"_id": existing_active["_id"]},
+                        {"$set": {"status": "resolved", "resolved_at": now_dt, "resolution_note": "Superseded by voice SOS trigger"}}
+                    )
 
         if not alert:
             # Create new emergency SOS immediately
@@ -315,89 +339,88 @@ async def trigger_sos_with_voice(
             except Exception as ws_e:
                 logger.error(f"Voice SOS instant broadcast error: {ws_e}")
 
-        # ─── 2. RUN AI PIPELINE: Whisper STT + Librosa + Ollama / Keyword Fallback ───
-        transcript = ""
-        acoustic_analysis = {}
-        intelligence = {}
+        # ─── 2. RUN AI PIPELINE IN BACKGROUND (WHISPER + LIBROSA + OLLAMA) ───
+        # Emergency alerts MUST respond instantly to the client (<500ms) without hanging for AI!
+        async def _enrich_voice_sos_background(alert_id, path_to_audio, lat_coord, lng_coord, user_data):
+            try:
+                trans_text = ""
+                acoustic_data = {}
+                try:
+                    trans_text = await transcribe_audio(path_to_audio)
+                    logger.info(f"Whisper transcript: '{trans_text}'")
+                except Exception as stt_e:
+                    logger.error(f"Whisper STT failed: {stt_e}")
 
-        try:
-            transcript = await transcribe_audio(audio_path)
-            logger.info(f"Whisper transcript: '{transcript}'")
-        except Exception as stt_err:
-            logger.error(f"Whisper STT failed: {stt_err}")
-            transcript = ""
+                try:
+                    acoustic_data = await analyze_voice_stress(path_to_audio)
+                    logger.info(f"Librosa stress score: {acoustic_data.get('stress_score')}")
+                except Exception as lib_e:
+                    logger.error(f"Librosa acoustic analysis failed: {lib_e}")
+                    acoustic_data = {
+                        "stress_score": 0.85,
+                        "emotion": "panic/distress",
+                        "danger_level": "critical",
+                        "trigger_emergency": True
+                    }
 
-        try:
-            acoustic_analysis = await analyze_voice_stress(audio_path)
-            logger.info(f"Librosa stress score: {acoustic_analysis.get('stress_score')}")
-        except Exception as lib_err:
-            logger.error(f"Librosa acoustic analysis failed: {lib_err}")
-            acoustic_analysis = {
-                "stress_score": 0.85,
-                "emotion": "panic/distress",
-                "danger_level": "critical",
-                "trigger_emergency": True
-            }
+                try:
+                    intel = await analyze_audio_intelligence(
+                        trans_text or "",
+                        acoustic_data,
+                        {"latitude": lat_coord, "longitude": lng_coord}
+                    )
+                except Exception as intel_e:
+                    logger.error(f"Intelligence analysis failed: {intel_e}")
+                    from app.ai.llm_engine import evaluate_keyword_and_acoustic_threat
+                    intel = evaluate_keyword_and_acoustic_threat(
+                        trans_text or "",
+                        acoustic_data,
+                        {"latitude": lat_coord, "longitude": lng_coord}
+                    )
 
-        try:
-            intelligence = await analyze_audio_intelligence(
-                transcript or "",
-                acoustic_analysis,
-                {"latitude": lat, "longitude": lng}
-            )
-        except Exception as intel_err:
-            logger.error(f"Intelligence analysis failed: {intel_err}")
-            from app.ai.llm_engine import evaluate_keyword_and_acoustic_threat
-            intelligence = evaluate_keyword_and_acoustic_threat(
-                transcript or "",
-                acoustic_analysis,
-                {"latitude": lat, "longitude": lng}
-            )
+                danger_l = intel.get("danger_level", "HIGH").upper()
+                sev_val = "critical" if danger_l == "CRITICAL" else "high"
 
-        # ─── 3. ENRICH ACTIVE ALERT IN MONGODB & BROADCAST TO ADMIN DASHBOARD ───
-        danger_lvl = intelligence.get("danger_level", "HIGH").upper()
-        severity_val = "critical" if danger_lvl == "CRITICAL" else "high"
+                db_col = get_collection("alerts")
+                if db_col is not None:
+                    await db_col.update_one(
+                        {"_id": alert_id},
+                        {"$set": {
+                            "message": trans_text or "Emergency Voice SOS Signal",
+                            "transcript": trans_text,
+                            "ai_analysis": intel,
+                            "acoustic_analysis": acoustic_data,
+                            "audio_file_path": path_to_audio,
+                            "severity": sev_val,
+                            "priority_score": 5 if sev_val == "critical" else 4
+                        }}
+                    )
 
-        if alerts_col is not None:
-            await alerts_col.update_one(
-                {"_id": alert["_id"]},
-                {"$set": {
-                    "message": transcript or alert.get("message") or "Emergency Voice SOS Signal",
-                    "transcript": transcript,
-                    "ai_analysis": intelligence,
-                    "acoustic_analysis": acoustic_analysis,
-                    "audio_file_path": audio_path,
-                    "severity": severity_val,
-                    "priority_score": 5 if severity_val == "critical" else 4
-                }}
-            )
+                # Broadcast tactical intelligence update to admins in real-time
+                await broadcast_to_admins("tactical_intel_update", {
+                    "alert_id": alert_id,
+                    "user_id": user_data.get("_id"),
+                    "user_name": user_data.get("name"),
+                    "transcript": trans_text or "(Distress vocalization / background acoustic noise)",
+                    "intelligence": intel,
+                    "acoustic_data": acoustic_data,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": "voice",
+                    "audio_url": f"/api/sos/audio/{alert_id}"
+                })
+                logger.info(f"Background voice enrichment complete for alert {alert_id}")
+            except Exception as bg_err:
+                logger.error(f"Background voice enrichment error: {bg_err}")
 
-        # Refresh alert fields for response
-        alert["message"] = transcript or alert.get("message")
-        alert["ai_analysis"] = intelligence
-        alert["severity"] = severity_val
-
-        # Broadcast tactical intelligence update to admins in real-time
-        try:
-            await broadcast_to_admins("tactical_intel_update", {
-                "alert_id": alert["_id"],
-                "user_id": current_user.get("_id"),
-                "user_name": current_user.get("name"),
-                "transcript": transcript or "(Distress vocalization / background acoustic noise)",
-                "intelligence": intelligence,
-                "acoustic_data": acoustic_analysis,
-                "timestamp": now_iso,
-                "source": "voice",
-                "audio_url": f"/api/sos/audio/{alert['_id']}"
-            })
-        except Exception as ws_err:
-            logger.error(f"Tactical intel broadcast failed: {ws_err}")
+        # Spawn non-blocking background task
+        import asyncio
+        asyncio.create_task(_enrich_voice_sos_background(alert["_id"], audio_path, lat, lng, current_user))
 
         return {
             "success": True,
             "alert": await format_alert_response(alert),
-            "intelligence": intelligence,
-            "transcript": transcript or ""
+            "intelligence": {"status": "processing_in_background", "danger_level": "HIGH"},
+            "transcript": "Processing voice distress analysis..."
         }
 
     except Exception as e:
@@ -513,13 +536,16 @@ async def resolve_sos_alert(
     current_user: dict = Depends(get_current_user)
 ):
     """Resolve an active SOS alert."""
-    alert = await resolve_alert(alert_id)
+    admin_id = str(current_user.get("_id") or current_user.get("id") or "")
+    admin_name = current_user.get("name") or "Administrator"
+    alert = await resolve_alert(alert_id, admin_id=admin_id, admin_name=admin_name)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     try:
         await broadcast_to_admins("sos_alert_resolved", {
             "alert_id": alert_id,
-            "resolved_by": current_user.get("_id")
+            "resolved_by": admin_id,
+            "resolved_by_name": admin_name
         })
     except Exception as e:
         logger.error(f"Failed to broadcast alert resolution: {e}")

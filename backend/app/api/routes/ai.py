@@ -126,22 +126,34 @@ async def chat(
     """Chat with SafeHer AI safety assistant."""
     session_id = message.session_id or str(uuid.uuid4())
 
-    # Build history for context
-    history = chat_sessions.get(session_id, [])
-    result = await chat_with_safeher(message.message, history)
+    try:
+        # Build history for context
+        history = chat_sessions.get(session_id, [])
+        result = await chat_with_safeher(message.message, history)
 
-    # Update session history
-    history.append({"role": "user", "content": message.message})
-    history.append({"role": "assistant", "content": result["reply"]})
-    chat_sessions[session_id] = history[-20:]  # keep last 10 turns
+        # Update session history
+        history.append({"role": "user", "content": message.message})
+        history.append({"role": "assistant", "content": result.get("reply", "")})
+        chat_sessions[session_id] = history[-20:]  # keep last 10 turns
 
-    return {
-        "reply": result["reply"],
-        "session_id": session_id,
-        "danger_detected": result.get("danger_detected", False),
-        "danger_level": result.get("danger_level", "safe"),
-        "suggested_action": result.get("suggested_action"),
-    }
+        return {
+            "reply": result.get("reply", "I am here to help you stay safe."),
+            "session_id": session_id,
+            "danger_detected": result.get("danger_detected", False),
+            "danger_level": result.get("danger_level", "safe"),
+            "suggested_action": result.get("suggested_action", "Maintain situational awareness"),
+        }
+    except Exception as e:
+        logger.error(f"Chat endpoint exception: {e}")
+        from app.ai.llm_engine import generate_rule_based_chat_response
+        res = generate_rule_based_chat_response(message.message)
+        return {
+            "reply": res["reply"],
+            "session_id": session_id,
+            "danger_detected": res.get("danger_detected", False),
+            "danger_level": res.get("danger_level", "safe"),
+            "suggested_action": res.get("suggested_action", "Maintain situational awareness"),
+        }
 
 
 @router.get("/area-risk")

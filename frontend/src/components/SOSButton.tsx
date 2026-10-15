@@ -62,7 +62,7 @@ export default function SOSButton({ onPress, onLongPress }: SOSButtonProps) {
           />
           <View style={styles.content}>
             <Text style={styles.sosText}>SOS</Text>
-            <Text style={styles.subText}>HOLD FOR SILENT</Text>
+            <Text style={styles.subText}>ONE TAP TO TRIGGER</Text>
           </View>
         </TouchableOpacity>
       </Animated.View>

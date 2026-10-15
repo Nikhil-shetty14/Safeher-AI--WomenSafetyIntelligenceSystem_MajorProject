@@ -58,7 +58,8 @@ export const adminAPI = {
   getStatePerformance: () => api.get('/api/state/performance'),
   getStateRankings: () => api.get('/api/state/rankings'),
   getStateEscalations: () => api.get('/api/state/escalations'),
-  generateSystemReport: () => api.get('/api/reports/generate', { responseType: 'blob' }),
+  generateSystemReport: (params?: { start_date?: string; end_date?: string; district?: string; division?: string }) =>
+    api.get('/api/reports/generate', { params, responseType: 'blob' }),
 };
 
 export const broadcastAPI = {

@@ -8,15 +8,11 @@ import React, {
 import { Platform } from "react-native";
 import { io, Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext";
+import { getBaseUrl, setBaseUrl, CANDIDATE_HOSTS, onBaseUrlChange } from "../api/client";
 
-const DEFAULT_SOCKET_HOST = "http://10.47.178.100:8000";
-
-const SOCKET_URL =
+const getSocketUrl = () =>
   process.env.EXPO_PUBLIC_SOCKET_URL ||
-  process.env.EXPO_PUBLIC_API_BASE_URL ||
-  DEFAULT_SOCKET_HOST;
-
-console.log("SafeHer socket host:", SOCKET_URL);
+  getBaseUrl();
 
 interface SocketContextType {
   socket: Socket | null;
@@ -38,13 +34,25 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
   const [isConnected, setIsConnected] = useState(false);
   const [dangerAlerts, setDangerAlerts] = useState<any[]>([]);
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
+  const [activeSocketUrl, setActiveSocketUrl] = useState(() => getSocketUrl());
+
+  // Listen for API client base URL fallback/changes
+  useEffect(() => {
+    return onBaseUrlChange((newHost) => {
+      console.log(`[Socket] API host changed to ${newHost}, updating socket...`);
+      setActiveSocketUrl(newHost);
+    });
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !user) return;
 
-    const socket = io(SOCKET_URL, {
+    const currentUrl = activeSocketUrl || getBaseUrl();
+    console.log("SafeHer socket host:", currentUrl);
+
+    const socket = io(currentUrl, {
       path: "/socket.io",
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       forceNew: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -53,14 +61,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     socket.on("connect", () => {
+      console.log(`[Socket] Connected successfully to ${currentUrl}`);
       setIsConnected(true);
       socket.emit("register_user", { user_id: user.id, role: user.role });
     });
 
-    socket.on("disconnect", () => setIsConnected(false));
+    socket.on("disconnect", (reason) => {
+      console.log(`[Socket] Disconnected from ${currentUrl}:`, reason);
+      setIsConnected(false);
+    });
 
     socket.on("connect_error", (err) => {
-      console.warn("Socket connect_error:", err);
+      console.warn(`[Socket] connect_error (${currentUrl}):`, err.message || err);
     });
 
     socket.on("danger_alert", (alert) => {
@@ -82,7 +94,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
       socketRef.current = null;
       setIsConnected(false);
     };
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, activeSocketUrl]);
 
   const sendLocation = (lat: number, lng: number, accuracy?: number) => {
     socketRef.current?.emit("location_update", {
@@ -96,6 +108,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
   const emitSOS = (location: any, severity = "high") => {
     socketRef.current?.emit("sos_triggered", {
       user_id: user?.id,
+      user_name: user?.name || "Emergency User",
+      user_phone: user?.phone || "N/A",
       location,
       severity,
     });

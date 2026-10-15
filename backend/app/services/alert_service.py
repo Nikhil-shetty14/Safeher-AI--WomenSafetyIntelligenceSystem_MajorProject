@@ -360,17 +360,26 @@ async def get_user_alerts(user_id: str, skip: int = 0, limit: int = 20) -> List[
     return await cursor.to_list(length=limit)
 
 
-async def resolve_alert(alert_id: str) -> Optional[dict]:
+async def resolve_alert(alert_id: str, admin_id: Optional[str] = None, admin_name: Optional[str] = None) -> Optional[dict]:
     collection = get_collection("alerts")
     if collection is None:
         return None
+    now = datetime.utcnow()
+    update_data: dict = {
+        "status": AlertStatus.resolved.value,
+        "acknowledged": True,
+        "resolved_at": now,
+        "updated_at": now,
+    }
+    if admin_id:
+        update_data["resolved_by"] = str(admin_id)
+        update_data["resolved_by_id"] = str(admin_id)
+    if admin_name:
+        update_data["resolved_by_name"] = str(admin_name)
+
     await collection.update_one(
         {"_id": alert_id},
-        {"$set": {
-            "status": AlertStatus.resolved.value,
-            "acknowledged": True,
-            "resolved_at": datetime.utcnow()
-        }}
+        {"$set": update_data}
     )
     return await collection.find_one({"_id": alert_id})
 
@@ -405,6 +414,24 @@ async def format_alert_response(alert: dict) -> dict:
                 "user_phone": user.get("phone", "N/A")
             }
 
+    # Normalize location to guarantee address is a string
+    location = dict(alert.get("location") or {})
+    raw_addr = location.get("address")
+    if isinstance(raw_addr, dict):
+        cleaned_addr = raw_addr.get("formatted_address") or raw_addr.get("display_name") or ""
+        location["address"] = cleaned_addr
+        # Auto-heal MongoDB document in the background
+        alerts_col = get_collection("alerts")
+        if alerts_col is not None:
+            asyncio.create_task(
+                alerts_col.update_one(
+                    {"_id": alert["_id"]},
+                    {"$set": {"location.address": cleaned_addr}}
+                )
+            )
+    elif not raw_addr and location.get("formatted_address"):
+        location["address"] = location.get("formatted_address")
+
     return {
         "id": alert["_id"],
         "user_id": alert["user_id"],
@@ -415,7 +442,7 @@ async def format_alert_response(alert: dict) -> dict:
         "acknowledged": alert.get("acknowledged", False),
         "acknowledged_at": alert.get("acknowledged_at"),
         "acknowledged_by": alert.get("acknowledged_by"),
-        "location": alert["location"],
+        "location": location,
         "message": alert.get("message"),
         "ai_analysis": alert.get("ai_analysis"),
         "audio_file_path": alert.get("audio_file_path"),
@@ -424,3 +451,4 @@ async def format_alert_response(alert: dict) -> dict:
         "created_at": alert["created_at"],
         "resolved_at": alert.get("resolved_at"),
     }
+

@@ -161,7 +161,7 @@ export default function StateCommandCenter() {
                     </td>
                     <td>
                       <div className="scc-admin-name">{admin.name}</div>
-                      <div className="scc-admin-role">{admin.role.replace('_', ' ').toUpperCase()}</div>
+                      <div className="scc-admin-role">{(admin.role || 'ADMIN').replace(/_/g, ' ').toUpperCase()}</div>
                     </td>
                     <td>{admin.region || 'N/A'}</td>
                     <td>{admin.resolved_sos}</td>

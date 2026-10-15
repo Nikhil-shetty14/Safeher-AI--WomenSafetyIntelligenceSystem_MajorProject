@@ -31,6 +31,30 @@ function DashboardContent() {
   // Intel Panel State
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   
+  // Real-time Command Center Live Clock
+  const [currentTime, setCurrentTime] = useState<string>(() => {
+    return new Date().toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    }).toUpperCase() + ' IST';
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(
+        new Date().toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true
+        }).toUpperCase() + ' IST'
+      );
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const { socket } = useSocket();
 
   const { isLoaded } = useJsApiLoader({
@@ -314,21 +338,50 @@ function DashboardContent() {
             }}>
               SafeHer AI Command Center
             </h1>
-            {adminProfile && (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                 <span style={{ padding: '4px 10px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa', borderRadius: '12px', fontSize: '11px', fontWeight: 800, letterSpacing: '1px' }}>
-                   {adminProfile.role.replace('_', ' ')}
-                 </span>
-                 <span style={{ padding: '4px 10px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#34d399', borderRadius: '12px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.5px' }}>
-                   📍 {
-                     adminProfile.role === 'CENTRAL_ADMIN' || adminProfile.role === 'SUPER_ADMIN' ? 'ALL STATES (INDIA)' :
-                     adminProfile.role === 'STATE_ADMIN' || adminProfile.role === 'ADMIN' ? (adminProfile.state || 'ALL DISTRICTS') :
-                     adminProfile.role === 'DIVISION_ADMIN' || adminProfile.role === 'REGIONAL_ADMIN' ? (adminProfile.division || 'DIVISION') :
-                     (adminProfile.district || 'DISTRICT')
-                   }
-                 </span>
-              </div>
-            )}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {adminProfile && (
+                <>
+                  <span style={{ padding: '4px 10px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa', borderRadius: '12px', fontSize: '11px', fontWeight: 800, letterSpacing: '1px' }}>
+                    {adminProfile.role.replace('_', ' ')}
+                  </span>
+                  <span style={{ padding: '4px 10px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#34d399', borderRadius: '12px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.5px' }}>
+                    📍 {
+                      adminProfile.role === 'CENTRAL_ADMIN' || adminProfile.role === 'SUPER_ADMIN' ? 'ALL STATES (INDIA)' :
+                      adminProfile.role === 'STATE_ADMIN' || adminProfile.role === 'ADMIN' ? (adminProfile.state || 'ALL DISTRICTS') :
+                      adminProfile.role === 'DIVISION_ADMIN' || adminProfile.role === 'REGIONAL_ADMIN' ? (adminProfile.division || 'DIVISION') :
+                      (adminProfile.district || 'DISTRICT')
+                    }
+                  </span>
+                </>
+              )}
+              <span 
+                style={{ 
+                  display: 'inline-flex',
+                  alignItems: 'center', 
+                  gap: '6px', 
+                  padding: '4px 12px', 
+                  background: 'rgba(168, 85, 247, 0.1)', 
+                  border: '1px solid rgba(168, 85, 247, 0.3)', 
+                  color: '#c084fc', 
+                  borderRadius: '12px', 
+                  fontSize: '11px', 
+                  fontWeight: 800, 
+                  letterSpacing: '0.5px' 
+                }}
+                title="Current Real-Time Operational Clock (IST)"
+              >
+                <span style={{ 
+                  width: '6px', 
+                  height: '6px', 
+                  borderRadius: '50%', 
+                  backgroundColor: '#22c55e', 
+                  boxShadow: '0 0 6px #22c55e',
+                  display: 'inline-block' 
+                }} />
+                <Clock size={12} style={{ color: '#c084fc' }} />
+                <span>{currentTime}</span>
+              </span>
+            </div>
           </div>
           <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px', fontWeight: 400 }}>
             AI-Powered Women Safety Intelligence System • <span style={{ color: '#c4b5fd', fontWeight: 500 }}>Detect. Understand. Predict. Protect.</span>

@@ -48,6 +48,7 @@ async def add_contact(
 
 
 @router.get("")
+@router.get("/", include_in_schema=False)
 async def get_contacts(current_user: dict = Depends(get_current_user)):
     """Get all emergency contacts for current user."""
     try:

@@ -17,7 +17,8 @@ import {
   FlatList,
   Modal,
 } from 'react-native';
-import MapView, { Marker, Circle, Polyline, UrlTile, Region } from 'react-native-maps';
+import MapView, { Marker, Circle, Polyline, UrlTile, Region, PROVIDER_GOOGLE } from 'react-native-maps';
+import { SafeHerWebMap, SafeHerWebMapRef } from '../components/SafeHerWebMap';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAuth } from '../context/AuthContext';
@@ -34,12 +35,9 @@ import {
   RouteGeometryPoint,
   GeocodeFeature,
 } from '../api/mapbox';
-import { Colors, Typography, Spacing, BorderRadius } from '../constants/theme';
+import { Colors, Typography, Spacing, BorderRadius, SAFEHER_MAP_STYLE } from '../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-
-
 
 interface EmergencyService {
   id: string;
@@ -64,7 +62,7 @@ interface DangerZone {
 function MapScreen() {
   const { user } = useAuth();
   const { sendLocation, isConnected } = useSocket();
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<SafeHerWebMapRef>(null);
 
   // ─── Location & Permissions State ─────────────────────
   const [location, setLocation] = useState<Location.LocationObjectCoords | null>(null);
@@ -75,7 +73,7 @@ function MapScreen() {
   const [locationHistory, setLocationHistory] = useState<RouteGeometryPoint[]>([]);
 
   // ─── Mapbox Styling & Tile Layers ─────────────────────
-  const [mapStyle, setMapStyle] = useState<MapboxStyleType>('streets');
+  const [mapStyle, setMapStyle] = useState<MapboxStyleType>('safeher');
   const [styleSelectorOpen, setStyleSelectorOpen] = useState(false);
   const [mapReady, setMapReady] = useState(false);
 
@@ -804,23 +802,23 @@ function MapScreen() {
         </View>
       )}
 
-      {/* ─── Native Map Surface Layer ───────────────── */}
-      <MapView
+      {/* ─── Cyber Map Surface Layer (SafeHer WebGL / CARTO Dark Basemap) ───────────────── */}
+      <SafeHerWebMap
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
         initialRegion={initialRegion}
-        showsUserLocation={Platform.OS === 'ios'}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        loadingEnabled={true}
-        loadingIndicatorColor="#8b5cf6"
-        loadingBackgroundColor="#1a1a2e"
-        toolbarEnabled={false}
-        moveOnMarkerPress={false}
+        location={location}
+        sosTriggered={sosTriggered}
+        dangerZones={dangerZones}
+        emergencyServices={emergencyServices}
+        activeFilters={activeFilters}
+        heatmapVisible={heatmapVisible}
+        safeTripMode={safeTripMode}
+        routePolyline={routePolyline}
+        mapStyle={mapStyle}
         onMapReady={() => {
           setMapReady(true);
-          console.log('[MapScreen] Native MapView ready');
+          console.log('[MapScreen] SafeHer Cyber Map ready');
           const currentLoc = locationRef.current;
           if (currentLoc) {
             mapRef.current?.animateToRegion(
@@ -834,153 +832,17 @@ function MapScreen() {
             );
           }
         }}
-      >
-        {/* Raster Tile Layer — CARTO/OSM tiles (no API key needed, works without Google Maps SDK) */}
-        <UrlTile
-          key={mapStyle}
-          urlTemplate={MAPBOX_STYLES[mapStyle]?.urlTemplate || MAPBOX_STYLES.streets.urlTemplate}
-          maximumZ={19}
-          minimumZ={1}
-          flipY={false}
-          tileSize={256}
-          zIndex={1}
-          shouldReplaceMapContent={Platform.OS === 'ios'}
-        />
-
-        {/* User Live GPS Marker */}
-        {location && (
-          <Marker
-            coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            zIndex={100}
-          >
-            <View style={styles.userMarkerContainer}>
-              <View style={[styles.userPulseRing, sosTriggered && styles.userPulseRingSOS]} />
-              <View style={[styles.userMarkerDot, sosTriggered && styles.userMarkerDotSOS]}>
-                <Ionicons name="person" size={12} color="#fff" />
-              </View>
-            </View>
-          </Marker>
-        )}
-
-        {/* SOS Blinking Geofence Ring */}
-        {sosTriggered && location && (
-          <Circle
-            center={{ latitude: location.latitude, longitude: location.longitude }}
-            radius={400}
-            fillColor="rgba(239, 68, 68, 0.18)"
-            strokeColor="#ef4444"
-            strokeWidth={2}
-          />
-        )}
-
-        {/* AI Danger Zones Circles & Badges */}
-        {heatmapVisible &&
-          dangerZones.map((zone) => (
-            <React.Fragment key={zone.id}>
-              <Circle
-                center={{ latitude: zone.latitude, longitude: zone.longitude }}
-                radius={zone.radius}
-                fillColor={
-                  zone.risk === 'critical'
-                    ? 'rgba(220, 38, 38, 0.28)'
-                    : zone.risk === 'high'
-                    ? 'rgba(239, 68, 68, 0.20)'
-                    : 'rgba(245, 158, 11, 0.18)'
-                }
-                strokeColor={
-                  zone.risk === 'critical'
-                    ? '#dc2626'
-                    : zone.risk === 'high'
-                    ? '#ef4444'
-                    : '#f59e0b'
-                }
-                strokeWidth={2}
-              />
-              <Marker
-                coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
-                anchor={{ x: 0.5, y: 0.5 }}
-                onPress={() => {
-                  Alert.alert(
-                    '🚨 AI Danger Zone',
-                    `${zone.name}\n\nThreat Score: ${zone.score}%\nLevel: ${zone.risk.toUpperCase()}\n\nSafeHer AI advises choosing an alternate illuminated route.`
-                  );
-                }}
-              >
-                <View style={styles.dangerZoneBadge}>
-                  <Ionicons name="warning" size={11} color="#fff" />
-                  <Text style={styles.dangerZoneBadgeText}>{zone.score}%</Text>
-                </View>
-              </Marker>
-            </React.Fragment>
-          ))}
-
-        {/* Emergency Services Markers */}
-        {emergencyServices
-          .filter((service) => activeFilters[service.type])
-          .map((service) => (
-            <Marker
-              key={service.id}
-              coordinate={{ latitude: service.latitude, longitude: service.longitude }}
-              onPress={() => {
-                setSelectedService(service);
-                Vibration.vibrate(30);
-              }}
-            >
-              <View
-                style={[
-                  styles.serviceMarkerBadge,
-                  service.type === 'police' && styles.policeBadge,
-                  service.type === 'hospital' && styles.hospitalBadge,
-                  service.type === 'women_center' && styles.womenBadge,
-                ]}
-              >
-                <Ionicons
-                  name={
-                    service.type === 'police'
-                      ? 'shield'
-                      : service.type === 'hospital'
-                      ? 'medical'
-                      : 'heart'
-                  }
-                  size={15}
-                  color="#fff"
-                />
-              </View>
-            </Marker>
-          ))}
-
-        {/* Safe Route Polyline (Emerald Green Glow) */}
-        {safeTripMode && routePolyline.length > 0 && (
-          <>
-            {/* Outer glow polyline */}
-            <Polyline
-              coordinates={routePolyline}
-              strokeColor="rgba(16, 185, 129, 0.35)"
-              strokeWidth={9}
-            />
-            {/* Inner primary path polyline */}
-            <Polyline
-              coordinates={routePolyline}
-              strokeColor="#10b981"
-              strokeWidth={4.5}
-              lineDashPattern={[0]}
-            />
-          </>
-        )}
-
-        {/* Destination Marker */}
-        {safeTripMode && routePolyline.length > 0 && (
-          <Marker
-            coordinate={routePolyline[routePolyline.length - 1]}
-            title={activeDestinationTitle || 'Destination'}
-          >
-            <View style={styles.destinationMarkerBadge}>
-              <Ionicons name="flag" size={16} color="#fff" />
-            </View>
-          </Marker>
-        )}
-      </MapView>
+        onSelectService={(service) => {
+          setSelectedService(service as EmergencyService);
+          Vibration.vibrate(30);
+        }}
+        onSelectDangerZone={(zone) => {
+          Alert.alert(
+            '🚨 AI Danger Zone',
+            `${zone.name}\n\nThreat Score: ${zone.score}%\nLevel: ${zone.risk.toUpperCase()}\n\nSafeHer AI advises choosing an alternate illuminated route.`
+          );
+        }}
+      />
 
       {/* ─── Emergency SOS Full-Screen Glowing Border ──── */}
       {sosTriggered && (
@@ -997,9 +859,13 @@ function MapScreen() {
           <View style={{ flex: 1 }}>
             <View style={styles.headerTitleRow}>
               <Text style={styles.headerTitle}>⚡ SafeHer AI</Text>
-              <View style={styles.mapboxPill}>
-                <Text style={styles.mapboxPillText}>{MAPBOX_STYLES[mapStyle].label}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.mapboxPill}
+                onPress={() => setStyleSelectorOpen(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.mapboxPillText}>{MAPBOX_STYLES[mapStyle]?.label || 'SafeHer Cyber'}</Text>
+              </TouchableOpacity>
             </View>
             <Text style={styles.headerSubtitle} numberOfLines={1}>
               📍 {currentAreaName}
@@ -1326,7 +1192,7 @@ function MapScreen() {
           onPress={() => setStyleSelectorOpen(false)}
         >
           <View style={styles.styleSelectorSheet}>
-            <Text style={styles.styleSelectorTitle}>Select Mapbox Style</Text>
+            <Text style={styles.styleSelectorTitle}>Select Map Theme & Style</Text>
             {(Object.keys(MAPBOX_STYLES) as MapboxStyleType[]).map((key) => {
               const cfg = MAPBOX_STYLES[key];
               const isSelected = mapStyle === key;

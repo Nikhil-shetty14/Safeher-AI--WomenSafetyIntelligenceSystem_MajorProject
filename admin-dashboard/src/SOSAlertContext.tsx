@@ -65,8 +65,8 @@ export const SOSAlertProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const { isAdmin, token } = useAdminAuth();
   const navigate = useNavigate();
 
-  // Ref set to prevent duplicate popups and duplicate counter increments across socket events/reconnects
-  const processedAlertIdsRef = useRef<Set<string>>(new Set());
+  // Ref to debounce rapid socket duplicate bursts (2s cooldown per alert)
+  const lastProcessedTimestampsRef = useRef<Map<string, number>>(new Map());
 
   const playAlertSound = useCallback((severity: string) => {
     try {
@@ -92,9 +92,6 @@ export const SOSAlertProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const listRes = await adminAPI.getUnacknowledgedAlerts(50);
       if (listRes?.data && Array.isArray(listRes.data)) {
         setUnacknowledgedAlerts(listRes.data);
-        listRes.data.forEach((a: SOSAlertItem) => {
-          if (a.id) processedAlertIdsRef.current.add(a.id);
-        });
       }
     } catch (err) {
       console.error("Failed to fetch unacknowledged SOS alert counts:", err);
@@ -116,11 +113,12 @@ export const SOSAlertProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const alertId = data.alert_id || data.id || data._id;
       if (!alertId) return;
 
-      // Duplicate prevention: If already seen, ignore duplicate socket emits
-      if (processedAlertIdsRef.current.has(alertId)) {
+      // Debounce rapid bursts (ignore if same alert received <2s ago)
+      const lastTime = lastProcessedTimestampsRef.current.get(alertId) || 0;
+      if (Date.now() - lastTime < 2000) {
         return;
       }
-      processedAlertIdsRef.current.add(alertId);
+      lastProcessedTimestampsRef.current.set(alertId, Date.now());
 
       const severity = (data.severity || "high").toLowerCase() as "low" | "medium" | "high" | "critical";
 

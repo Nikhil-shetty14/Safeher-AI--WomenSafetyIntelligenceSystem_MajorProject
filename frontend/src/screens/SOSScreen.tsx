@@ -15,7 +15,7 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Marker, UrlTile } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import LottieView from 'lottie-react-native';
 import * as Location from 'expo-location';
@@ -27,7 +27,8 @@ import * as TaskManager from 'expo-task-manager';
 import { sosAPI, aiAPI, contactsAPI, locationAPI } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../constants/theme';
+import { Colors, Typography, Spacing, BorderRadius, Shadows, SAFEHER_MAP_STYLE } from '../constants/theme';
+import { SafeHerWebMap } from '../components/SafeHerWebMap';
 
 const { width } = Dimensions.get('window');
 const LOCATION_TASK_NAME = 'SOS_LOCATION_TRACKING';
@@ -145,18 +146,12 @@ export default function SOSScreen({ navigation, route }: any) {
       }
     }
 
-    if (autoTrigger && phase === 'idle') {
+    if (autoTrigger) {
       setIsHiddenMode(false);
       navigation.setParams({ autoTrigger: undefined, triggerType: undefined });
-      const timer = setTimeout(() => {
-        if (user?.safety_preferences?.sos_auto_activation) {
-          triggerSOS(triggerType);
-        } else {
-          startCountdown(triggerType);
-        }
-      }, 500);
-
-      return () => clearTimeout(timer);
+      console.log(`[SOS] One-tap auto-trigger received: type=${triggerType} → triggerSOS directly`);
+      triggerSOS(triggerType);
+      return;
     }
 
     // Direct SOS tab navigation (no special mode params):
@@ -276,7 +271,11 @@ export default function SOSScreen({ navigation, route }: any) {
 
   // Countdown Timers
   const startCountdown = (trigger = 'button') => {
-    if (phase !== 'idle') return;
+    if (phase !== 'idle') {
+      console.log(`[SOS] startCountdown blocked: phase=${phase} (not idle)`);
+      return;
+    }
+    console.log(`[SOS] Starting countdown for trigger: ${trigger}`);
     setPhase('countdown');
     setCountdown(3);
     let c = 3;
@@ -287,6 +286,7 @@ export default function SOSScreen({ navigation, route }: any) {
       Vibration.vibrate(200);
       if (c <= 0) {
         clearInterval(countdownRef.current);
+        console.log('[SOS] Countdown complete → triggerSOS');
         triggerSOS(trigger);
       }
     }, 1000);
@@ -451,6 +451,11 @@ export default function SOSScreen({ navigation, route }: any) {
 
   // Main Trigger SOS Logic
   const triggerSOS = async (trigger = 'button') => {
+    if (phase === 'sending') {
+      console.log('[SOS] triggerSOS blocked: already sending');
+      return;
+    }
+    console.log(`[SOS] triggerSOS called: trigger=${trigger}`);
     const isStealth = trigger === 'stealth' || isHiddenMode;
     setPhase('sending');
     holdAnim.setValue(0);
@@ -962,7 +967,7 @@ export default function SOSScreen({ navigation, route }: any) {
                       ]}
                       onPressIn={handlePressInSOS}
                       onPressOut={handlePressOutSOS}
-                      onPress={() => startCountdown('button')}
+                      onPress={() => triggerSOS('button')}
                     >
                       <LottieView
                         source={{ uri: 'https://lottie.host/808b3e83-366b-4e00-84c4-77e82f8a846c/2jZ5J8Yf9O.json' }}
@@ -1168,55 +1173,25 @@ export default function SOSScreen({ navigation, route }: any) {
             {/* LIVE MINI MAP */}
             {location && (
               <View style={s.mapContainer}>
-                <MapView
+                <SafeHerWebMap
                   style={s.miniMap}
-                  mapType={Platform.OS === 'android' ? 'none' : 'standard'}
                   initialRegion={{
                     latitude: location.latitude,
                     longitude: location.longitude,
                     latitudeDelta: 0.012,
                     longitudeDelta: 0.012,
                   }}
-                  showsUserLocation={Platform.OS === 'ios'}
-                  showsMyLocationButton={false}
-                  scrollEnabled={false}
-                  zoomEnabled={false}
-                >
-                  <UrlTile
-                    urlTemplate="https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-                    maximumZ={19}
-                    minimumZ={1}
-                    flipY={false}
-                    tileSize={256}
-                    zIndex={1}
-                    shouldReplaceMapContent={Platform.OS === 'ios'}
-                  />
-                  <Marker
-                    coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-                    title="Your Location"
-                    description="SOS Active Location"
-                  >
-                    <View style={s.userMarkerOuter}>
-                      <View style={s.userMarkerInner} />
-                    </View>
-                  </Marker>
-
-                  {nearbyServices.map((serv, idx) => (
-                    <Marker
-                      key={idx.toString()}
-                      coordinate={{
-                        latitude: serv.latitude || location.latitude + 0.002 * (idx + 1),
-                        longitude: serv.longitude || location.longitude + 0.002 * (idx + 1),
-                      }}
-                      title={serv.name}
-                      description={serv.type}
-                    >
-                      <View style={[s.havenMarker, { backgroundColor: serv.type === 'police' ? '#1E40AF' : '#DC2626' }]}>
-                        <Ionicons name={serv.type === 'police' ? 'shield' : 'medical'} size={14} color="#fff" />
-                      </View>
-                    </Marker>
-                  ))}
-                </MapView>
+                  location={location}
+                  sosTriggered={true}
+                  emergencyServices={nearbyServices.map((serv, idx) => ({
+                    id: `sos-serv-${idx}`,
+                    name: serv.name,
+                    type: (serv.type as any) || 'police',
+                    latitude: serv.latitude || location.latitude + 0.002 * (idx + 1),
+                    longitude: serv.longitude || location.longitude + 0.002 * (idx + 1),
+                  }))}
+                  mapStyle="safeher"
+                />
 
                 <View style={s.mapOverlayBadge}>
                   <Ionicons name="location" size={14} color="#10B981" />

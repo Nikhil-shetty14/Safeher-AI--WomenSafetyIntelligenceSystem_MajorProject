@@ -101,20 +101,35 @@ async def sos_triggered(sid, data):
     """Handle SOS trigger from mobile app."""
     user_id = data.get("user_id")
     location = data.get("location", {})
+    user_name = data.get("user_name")
+    user_phone = data.get("user_phone")
+
+    if user_id and (not user_name or not user_phone):
+        try:
+            from app.core.database import get_collection
+            users_col = get_collection("users")
+            if users_col is not None:
+                user_doc = await users_col.find_one({"_id": user_id})
+                if user_doc:
+                    user_name = user_name or user_doc.get("name")
+                    user_phone = user_phone or user_doc.get("phone")
+        except Exception:
+            pass
 
     alert_id = data.get("alert_id") or str(uuid.uuid4())
     alert_broadcast = {
         "type": "sos_alert",
         "alert_id": alert_id,
         "id": alert_id,
+        "_id": alert_id,
         "user_id": user_id,
-        "user_name": data.get("user_name"),
-        "user_phone": data.get("user_phone"),
+        "user_name": user_name or "Emergency User",
+        "user_phone": user_phone or "N/A",
         "location": location,
         "timestamp": datetime.utcnow().isoformat(),
         "severity": data.get("severity", "high"),
         "trigger_type": data.get("trigger_type", "socket_trigger"),
-        "message": data.get("message"),
+        "message": data.get("message") or "Emergency SOS Alert Activated",
         "status": "active",
         "acknowledged": False,
     }

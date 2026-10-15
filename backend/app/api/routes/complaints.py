@@ -80,7 +80,7 @@ async def submit_complaint(
     description: str = Form(...),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
-    files: List[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(default=None),
     current_user: dict = Depends(get_current_user)
 ):
     try:
@@ -181,7 +181,12 @@ async def update_complaint_status(
     if not update_dict:
         raise HTTPException(status_code=400, detail="No data to update")
 
-    update_dict["updated_at"] = datetime.utcnow()
+    now = datetime.utcnow()
+    update_dict["updated_at"] = now
+    if update_dict.get("status") in ["resolved", ComplaintStatus.resolved.value]:
+        update_dict["resolved_at"] = now
+        update_dict["resolved_by"] = str(current_admin.get("_id") or current_admin.get("id") or "")
+        update_dict["resolved_by_name"] = current_admin.get("name") or "Administrator"
 
     # Note: Using update_one and then find_one to get updated document
     result = await complaints_col.update_one(

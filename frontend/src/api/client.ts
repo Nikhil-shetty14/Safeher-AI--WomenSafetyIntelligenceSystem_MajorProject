@@ -1,15 +1,88 @@
 import axios from 'axios';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
-const DEFAULT_API_HOST = 'http://10.47.178.100:8000';
+// Resolve Metro packager / dev server IP dynamically from Expo runtime
+export const getDevServerIp = (): string | null => {
+  try {
+    const hostUri =
+      Constants.expoConfig?.hostUri ||
+      (Constants as any).manifest2?.extra?.expoClient?.hostUri ||
+      (Constants as any).manifest?.debuggerHost ||
+      Constants.linkingUri;
 
-export const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_HOST;
-console.log('SafeHer API host:', BASE_URL);
+    if (hostUri) {
+      const clean = hostUri.replace(/^[a-z]+:\/\//i, '');
+      const ip = clean.split(':')[0];
+      if (ip && ip !== 'localhost' && ip !== '127.0.0.1' && ip !== '0.0.0.0') {
+        return ip;
+      }
+    }
+  } catch (_) {}
+  return null;
+};
+
+const devIp = getDevServerIp();
+const devHost = devIp ? `http://${devIp}:8000` : null;
+const envHost = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+// Build robust candidate hosts based on runtime environment
+const hosts: string[] = [];
+if (Platform.OS === 'android') {
+  // On Android, devHost (Metro dev server IP) is the most reliable target
+  if (devHost) hosts.push(devHost);
+  if (envHost && !envHost.includes('127.0.0.1') && !envHost.includes('localhost')) {
+    hosts.push(envHost);
+  }
+  hosts.push('http://10.47.178.100:8000');
+  // Only add 10.0.2.2 as fallback if devHost wasn't detected (pure emulator without Metro IP)
+  if (!devHost) hosts.push('http://10.0.2.2:8000');
+} else {
+  // Web / iOS simulator / Desktop
+  if (envHost) hosts.push(envHost);
+  if (devHost) hosts.push(devHost);
+  hosts.push('http://127.0.0.1:8000');
+  hosts.push('http://localhost:8000');
+  hosts.push('http://10.47.178.100:8000');
+}
+
+// Ordered candidate API hosts
+export const CANDIDATE_HOSTS: string[] = Array.from(new Set(hosts.filter(Boolean) as string[]));
+
+let _activeBaseUrl = CANDIDATE_HOSTS[0] || 'http://10.47.178.100:8000';
+
+type BaseUrlListener = (url: string) => void;
+const _baseUrlListeners: Set<BaseUrlListener> = new Set();
+
+export const onBaseUrlChange = (listener: BaseUrlListener): (() => void) => {
+  _baseUrlListeners.add(listener);
+  return () => {
+    _baseUrlListeners.delete(listener);
+  };
+};
+
+export const getBaseUrl = () => _activeBaseUrl;
+export const setBaseUrl = (url: string) => {
+  if (!url || _activeBaseUrl === url) return;
+  console.log(`[API] Base URL explicitly updated: ${_activeBaseUrl} -> ${url}`);
+  _activeBaseUrl = url;
+  api.defaults.baseURL = url;
+  _baseUrlListeners.forEach((listener) => {
+    try {
+      listener(url);
+    } catch (e) {
+      console.warn('[API] Error in baseUrl change listener:', e);
+    }
+  });
+};
+
+export const BASE_URL = _activeBaseUrl;
+console.log('SafeHer active API host:', _activeBaseUrl, '(devIp:', devIp, ', platform:', Platform.OS, ')');
 
 const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 45000, // Generous timeout for endpoints that call local LLMs (Ollama phi3)
+  baseURL: _activeBaseUrl,
+  timeout: 30000,
 });
 
 // ─── Auth State Sync ──────────────────────────────────
@@ -23,7 +96,7 @@ export const setAuthExpiredCallback = (callback: () => void) => {
 
 // Attach JWT token to every request and log requests
 api.interceptors.request.use(async (config) => {
-  console.log(`[API Request] ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
+  console.log(`[API Request] ${config.method?.toUpperCase()} ${config.baseURL || _activeBaseUrl}${config.url}`);
   const token = await AsyncStorage.getItem('safeher_token');
   if (token) {
     if (config.headers && typeof config.headers.set === 'function') {
@@ -43,21 +116,24 @@ api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const config = err.config;
-    console.error(`[API Error] ${config?.method?.toUpperCase()} ${config?.url} | Status: ${err.response?.status} | Message: ${err.message} | Response:`, err.response?.data);
+    console.error(`[API Error] ${config?.method?.toUpperCase()} ${config?.url} | Status: ${err.response?.status} | Message: ${err.message}`);
     
-    // Auto-retry once for network errors or timeouts (no response from server)
+    // Retry once on the SAME host with backoff if network failure or timeout
     if (!err.response && config && !config._retryCount) {
       config._retryCount = 1;
-      console.log(`[API Retry] Retrying request ${config.baseURL}${config.url} due to network issue...`);
-      return new Promise(resolve => setTimeout(() => resolve(api(config)), 2000));
+      console.warn(`[API Retry] Temporary network hiccup for ${config.url}. Retrying in 1.5s...`);
+      await new Promise(r => setTimeout(r, 1500));
+      return api(config);
     }
 
     if (err.response?.status === 401) {
-      // Don't auto-logout on auth endpoints (login/register/verify) — those 401s
+      // Don't auto-logout on auth endpoints (login/register/verify/forgot/reset) — those 401s
       // are credential errors, not expired-token errors.
       const isAuthEndpoint = config?.url?.includes('/api/auth/login') ||
                              config?.url?.includes('/api/auth/register') ||
-                             config?.url?.includes('/api/auth/verify-otp');
+                             config?.url?.includes('/api/auth/verify-otp') ||
+                             config?.url?.includes('/api/auth/forgot-password') ||
+                             config?.url?.includes('/api/auth/reset-password');
       if (!isAuthEndpoint) {
         console.warn('[API] 401 on protected route — clearing auth state and forcing re-login');
         await AsyncStorage.multiRemove(['safeher_token', 'safeher_user']);
@@ -76,11 +152,12 @@ api.interceptors.response.use(
 const uploadMultipart = (urlPath: string, formData: FormData): Promise<{ data: any; status: number }> => {
   return new Promise(async (resolve, reject) => {
     try {
-      console.log(`[API Upload Request] POST ${BASE_URL}${urlPath}`);
+      const currentHost = getBaseUrl();
+      console.log(`[API Upload Request] POST ${currentHost}${urlPath}`);
       const token = await AsyncStorage.getItem('safeher_token');
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${BASE_URL}${urlPath}`);
+      xhr.open('POST', `${currentHost}${urlPath}`);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       // Do NOT set Content-Type — XHR will set multipart/form-data with the correct boundary automatically.
       xhr.timeout = 30000;
@@ -112,7 +189,7 @@ const uploadMultipart = (urlPath: string, formData: FormData): Promise<{ data: a
 
       xhr.send(formData);
     } catch (err: any) {
-      console.error(`[API Upload Error] POST ${BASE_URL}${urlPath} | Message: ${err.message}`);
+      console.error(`[API Upload Error] POST ${getBaseUrl()}${urlPath} | Message: ${err.message}`);
       if (!err.response) {
         err.response = { data: { error: err.message } };
       }
@@ -142,12 +219,13 @@ const uploadMultipartWithRetry = async (urlPath: string, formData: FormData, max
 export const healthAPI = {
   check: async () => {
     try {
-      console.log(`[Network Health Check] Pinging ${BASE_URL}/health ...`);
+      const currentHost = getBaseUrl();
+      console.log(`[Network Health Check] Pinging ${currentHost}/health ...`);
       const res = await api.get('/health', { timeout: 5000 });
       console.log(`[Network Health Check] Success:`, res.data);
       return true;
     } catch (err: any) {
-      console.error(`[Network Health Check] Failed to reach backend at ${BASE_URL}. Is the server running and on the same WiFi? Error:`, err.message);
+      console.error(`[Network Health Check] Failed to reach backend at ${getBaseUrl()}. Is the server running and on the same WiFi? Error:`, err.message);
       return false;
     }
   }

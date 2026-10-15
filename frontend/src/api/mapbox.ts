@@ -12,6 +12,7 @@ export const hasValidMapboxToken =
   MAPBOX_ACCESS_TOKEN.length > 50;
 
 export type MapboxStyleType =
+  | 'safeher'
   | 'dark'
   | 'navigation'
   | 'streets'
@@ -32,6 +33,14 @@ export interface MapboxTileConfig {
 // CARTO and OpenStreetMap tiles are 100% free and require zero authentication tokens,
 // ensuring the map NEVER displays a black screen even if Mapbox token is missing/expired.
 export const MAPBOX_STYLES: Record<MapboxStyleType, MapboxTileConfig> = {
+  safeher: {
+    id: 'safeher',
+    label: 'SafeHer Cyber Theme',
+    icon: 'shield-checkmark',
+    urlTemplate: 'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
+    attribution: '© CARTO © OpenStreetMap',
+    tileSize: 256,
+  },
   carto_dark: {
     id: 'carto_dark',
     label: 'CARTO Cyber Dark',

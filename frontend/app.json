@@ -24,11 +24,6 @@
       },
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.safeher.ai",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyD7CyOPN_LvF_BCEZvwt-qARRVFzhHXLKQ"
-        }
-      },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

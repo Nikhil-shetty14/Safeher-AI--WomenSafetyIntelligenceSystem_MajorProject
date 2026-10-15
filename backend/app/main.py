@@ -39,12 +39,13 @@ async def log_requests(request: Request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     logger.info(f"NETWORK_DEBUG | Incoming request: {request.method} {request.url} from IP: {client_ip}")
     
-    # Safely log request bodies for POST/PUT without consuming the stream
-    if request.method in ["POST", "PUT", "PATCH"]:
+    # Safely log request bodies for JSON POST/PUT without consuming multipart/binary streams
+    content_type = request.headers.get("content-type", "")
+    if request.method in ["POST", "PUT", "PATCH"] and "application/json" in content_type:
         try:
             body = await request.body()
             if body:
-                logger.info(f"NETWORK_DEBUG | Request body: {body.decode('utf-8')[:1000]}")
+                logger.info(f"NETWORK_DEBUG | Request body: {body.decode('utf-8', errors='ignore')[:1000]}")
         except Exception as e:
             logger.error(f"NETWORK_DEBUG | Failed to read body: {e}")
 

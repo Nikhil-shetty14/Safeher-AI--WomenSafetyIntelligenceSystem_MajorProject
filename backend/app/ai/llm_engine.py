@@ -150,7 +150,7 @@ def get_ollama_client() -> httpx.AsyncClient:
     return _ollama_client
 
 
-async def _call_ollama(messages: list, format_json: bool = False, temperature: float = 0.2, max_tokens: int = 180) -> str:
+async def _call_ollama(messages: list, format_json: bool = False, temperature: float = 0.2, max_tokens: int = 180, timeout: float = 8.0) -> str:
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     client = get_ollama_client()
     
@@ -173,8 +173,8 @@ async def _call_ollama(messages: list, format_json: bool = False, temperature: f
             payload["format"] = "json"
 
         try:
-            logger.info(f"Calling Ollama model '{model_name}' (this may take a while on cold start)...")
-            response = await client.post(url, json=payload, timeout=90.0)
+            logger.info(f"Calling Ollama model '{model_name}' (timeout={timeout}s)...")
+            response = await client.post(url, json=payload, timeout=timeout)
             if response.status_code == 200:
                 data = response.json()
                 logger.info(f"Ollama model '{model_name}' responded successfully.")
@@ -394,8 +394,114 @@ async def analyze_audio_intelligence(transcript: str, acoustic_data: dict, locat
 
 
 
+def generate_rule_based_chat_response(message: str) -> dict:
+    """Intelligent zero-latency rule-based women's safety expert engine."""
+    text = (message or "").lower().strip()
+
+    # 1. Critical Emergency / Imminent Distress
+    emergency_keywords = [
+        "danger", "help", "attack", "scared", "unsafe", "threat", "following",
+        "harass", "stalk", "kidnap", "emergency", "save me", "run", "hurt",
+        "abuse", "suspicious", "creepy", "weapon", "force"
+    ]
+    if any(k in text for k in emergency_keywords):
+        return {
+            "reply": (
+                "🚨 **IMMEDIATE SAFETY ADVICE**: If you are in active danger, please **tap the SOS button** "
+                "on your screen right now or call **112** (All-India Emergency Helpline).\n\n"
+                "• **Move to safety**: Head immediately into the nearest open store, restaurant, or well-lit commercial area.\n"
+                "• **Make noise**: Call someone you trust or speak loudly on the phone.\n"
+                "• **Do not stop or isolate yourself**: Stay in public view and avoid dark alleys or shortcuts.\n"
+                "• SafeHer has live GPS tracking ready — your emergency contacts will receive your real-time coordinates if you trigger SOS."
+            ),
+            "danger_detected": True,
+            "danger_level": "critical",
+            "suggested_action": "Trigger SOS or dial 112 immediately",
+            "fallback": True,
+        }
+
+    # 2. Safe Routes / Nearby Services / Map
+    if any(k in text for k in ["map", "route", "police", "hospital", "station", "safe area", "services", "shelter"]):
+        return {
+            "reply": (
+                "🗺️ **Safe Route Guidance**:\n"
+                "• Check the **Safe Route Map** tab to see verified nearby police stations, hospitals, and well-lit routes.\n"
+                "• SafeHer's AI continuously evaluates street illumination and incident history to steer you away from isolated corridors.\n"
+                "• If you need an escort, activate the **Walk With Me** companion mode on the Map screen."
+            ),
+            "danger_detected": False,
+            "danger_level": "safe",
+            "suggested_action": "Open Safe Route Map for verified safe navigation",
+            "fallback": True,
+        }
+
+    # 3. Night Travel / Walking Alone / Precautions
+    if any(k in text for k in ["night", "alone", "travel", "cab", "taxi", "walk", "uber", "auto", "precaution", "tips"]):
+        return {
+            "reply": (
+                "🛡️ **Night & Travel Safety Precautions**:\n"
+                "1. **Share your ride details**: Check the vehicle license number before boarding and share your live ride status.\n"
+                "2. **Activate Safe Timer**: Set a 15–30 minute check-in countdown. If not dismissed, it auto-alerts your primary contacts.\n"
+                "3. **Stay alert**: Keep one earphone off so you can hear approaching vehicles or footsteps.\n"
+                "4. **Keep emergency trigger handy**: Triple-press your power button or use SafeHer's one-tap SOS if anything feels wrong."
+            ),
+            "danger_detected": False,
+            "danger_level": "safe",
+            "suggested_action": "Set Safe Timer for your journey",
+            "fallback": True,
+        }
+
+    # 4. App Features & Distress Tools
+    if any(k in text for k in ["feature", "stealth", "fake call", "panic word", "how to", "function", "trigger"]):
+        return {
+            "reply": (
+                "📱 **SafeHer Protection Features**:\n"
+                "• **One-Tap SOS**: Instantly alerts police command & emergency contacts with live GPS coordinates.\n"
+                "• **Voice SOS**: Detects distress vocalizations & keywords completely hands-free.\n"
+                "• **Stealth Mode**: Disguises the screen as a battery monitor while silently transmitting GPS & audio.\n"
+                "• **Fake Call**: Generates a realistic incoming phone call to help you exit uncomfortable situations.\n"
+                "• **Chat Panic Word**: Set a secret keyword in Settings; typing it in this chat triggers silent SOS!"
+            ),
+            "danger_detected": False,
+            "danger_level": "safe",
+            "suggested_action": "Explore SafeHer safety tools",
+            "fallback": True,
+        }
+
+    # 5. Greetings & Assistant Introduction
+    if any(k in text for k in ["hi", "hello", "hey", "who are you", "what can you do", "morning", "evening", "namaste"]):
+        return {
+            "reply": (
+                "Hello! I am **SafeHer AI**, your intelligent safety assistant. 🛡️\n\n"
+                "I am here 24/7 to help keep you safe. I can help you with:\n"
+                "• Emergency protocols & danger guidance\n"
+                "• Real-time safe routes & nearby police stations\n"
+                "• Travel precautions and distress tools\n\n"
+                "How are you feeling right now? If you need help, just let me know."
+            ),
+            "danger_detected": False,
+            "danger_level": "safe",
+            "suggested_action": "Ask any safety question or tap SOS if in danger",
+            "fallback": True,
+        }
+
+    # 6. General Safety Response
+    return {
+        "reply": (
+            "I'm here with you. Remember that your safety is the absolute priority. "
+            "If you ever feel uncomfortable, insecure, or notice suspicious behavior, trust your instincts: "
+            "move towards populated areas, call a trusted contact, or tap the **SOS button** on the home screen.\n\n"
+            "Is there a specific situation or route you would like me to assist you with?"
+        ),
+        "danger_detected": False,
+        "danger_level": "safe",
+        "suggested_action": "Stay alert and keep emergency contacts updated",
+        "fallback": True,
+    }
+
+
 async def chat_with_safeher(message: str, history: list = None) -> dict:
-    """AI safety chatbot conversation."""
+    """AI safety chatbot conversation with fast timeout and intelligent rule fallback."""
     try:
         messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
 
@@ -404,33 +510,28 @@ async def chat_with_safeher(message: str, history: list = None) -> dict:
 
         messages.append({"role": "user", "content": message})
 
+        # Fast timeout (5s) for conversational responsiveness
         reply = await _call_ollama(
             messages=messages,
             temperature=0.7,
-            max_tokens=300
+            max_tokens=300,
+            timeout=5.0
         )
 
         # Check reply for danger indicators
-        danger_keywords = ["call police", "emergency", "danger", "unsafe", "threat", "attack", "help"]
+        danger_keywords = ["call police", "emergency", "danger", "unsafe", "threat", "attack", "help", "112"]
         danger_detected = any(kw in reply.lower() for kw in danger_keywords)
 
         return {
             "reply": reply,
             "danger_detected": danger_detected,
-            "danger_level": "medium" if danger_detected else "safe",
+            "danger_level": "high" if danger_detected else "safe",
+            "suggested_action": "Trigger SOS or dial 112 if in danger" if danger_detected else "Maintain situational awareness",
         }
 
     except Exception as e:
-        logger.error(f"Chat AI failed: {e}")
-        # Return a graceful fallback response instead of crashing with 503
-        return {
-            "reply": "I'm having trouble connecting to my AI engine right now. "
-                     "If you're in danger, please tap the SOS button immediately or call 112. "
-                     "I'll be back online shortly — please try again in a moment.",
-            "danger_detected": False,
-            "danger_level": "safe",
-            "fallback": True,
-        }
+        logger.info(f"Ollama chat unavailable ({e}) — activating intelligent safety fallback engine")
+        return generate_rule_based_chat_response(message)
 
 
 async def predict_area_risk(latitude: float, longitude: float, time_of_day: str = None) -> dict:

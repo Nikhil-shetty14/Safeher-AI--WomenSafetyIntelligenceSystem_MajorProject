@@ -66,8 +66,8 @@ def get_whisper_model():
     return _whisper_model
 
 
-async def transcribe_audio(audio_file_path: str) -> Optional[str]:
-    """Transcribe audio using OpenAI Whisper."""
+def _sync_transcribe(audio_file_path: str) -> Optional[str]:
+    """Synchronous Whisper transcription to run in background thread."""
     if not _check_ai():
         return "Audio transcription service disabled (missing dependencies)."
     
@@ -75,32 +75,39 @@ async def transcribe_audio(audio_file_path: str) -> Optional[str]:
     if not model:
         return "Audio transcription service unavailable."
 
+    temp_wav = None
     try:
         # Convert to WAV if needed (Whisper handles many formats but pydub can normalize)
+        target_path = audio_file_path
         if not audio_file_path.endswith(".wav"):
             audio = AudioSegment.from_file(audio_file_path)
             temp_wav = audio_file_path + ".normalized.wav"
             audio.export(temp_wav, format="wav")
-            audio_file_path = temp_wav
+            target_path = temp_wav
 
-        result = model.transcribe(audio_file_path, fp16=False)
+        result = model.transcribe(target_path, fp16=False)
         transcript = result.get("text", "").strip()
-        
-        # Cleanup temp file if created
-        if ".normalized.wav" in audio_file_path:
-            os.remove(audio_file_path)
-            
         logger.info(f"Audio Transcribed: {len(transcript)} chars")
         return transcript
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         return None
+    finally:
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except Exception:
+                pass
 
 
-async def analyze_voice_stress(audio_file_path: str) -> Dict[str, Any]:
-    """
-    Perform deep acoustic analysis to detect panic, stress, and environmental danger.
-    """
+async def transcribe_audio(audio_file_path: str) -> Optional[str]:
+    """Transcribe audio using OpenAI Whisper in a non-blocking thread."""
+    import asyncio
+    return await asyncio.to_thread(_sync_transcribe, audio_file_path)
+
+
+def _sync_analyze_voice_stress(audio_file_path: str) -> Dict[str, Any]:
+    """Synchronous Librosa acoustic stress analysis to run in background thread."""
     if not _check_librosa():
         return _get_default_analysis()
 
@@ -169,6 +176,12 @@ async def analyze_voice_stress(audio_file_path: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Acoustic analysis failed: {e}")
         return _get_default_analysis()
+
+
+async def analyze_voice_stress(audio_file_path: str) -> Dict[str, Any]:
+    """Perform acoustic stress analysis in a non-blocking thread."""
+    import asyncio
+    return await asyncio.to_thread(_sync_analyze_voice_stress, audio_file_path)
 
 
 def _get_default_analysis() -> Dict[str, Any]:

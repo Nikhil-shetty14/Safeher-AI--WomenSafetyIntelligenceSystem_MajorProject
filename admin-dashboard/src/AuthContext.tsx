@@ -56,3 +56,6 @@ export const useAdminAuth = () => {
   if (!c) throw new Error('useAdminAuth must be inside AdminAuthProvider');
   return c;
 };
+
+export const useAuth = useAdminAuth;
+

@@ -222,6 +222,82 @@ select:focus {
   transform: translateY(-1px);
 }
 
+.map-tool-btn.active-map {
+  background: rgba(167, 139, 250, 0.2) !important;
+  border-color: rgba(167, 139, 250, 0.6) !important;
+  color: #c084fc !important;
+  box-shadow: 0 0 14px rgba(167, 139, 250, 0.35);
+}
+
+.map-tool-btn.active-layers {
+  background: rgba(245, 158, 11, 0.2) !important;
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  color: #fbbf24 !important;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.35);
+}
+
+.map-tool-btn.active-users {
+  background: rgba(6, 182, 212, 0.2) !important;
+  border-color: rgba(6, 182, 212, 0.6) !important;
+  color: #06b6d4 !important;
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.35);
+}
+
+.map-tool-btn.active-settings {
+  background: rgba(16, 185, 129, 0.2) !important;
+  border-color: rgba(16, 185, 129, 0.6) !important;
+  color: #34d399 !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.35);
+}
+
+/* Tactical Flyout Styles */
+.tactical-flyout {
+  animation: flyoutSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes flyoutSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.tactical-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.tactical-toggle.on {
+  background: #8b5cf6;
+  border-color: #a78bfa;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+}
+
+.tactical-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+}
+
+.tactical-toggle.on .tactical-toggle-thumb {
+  transform: translateX(16px);
+}
+
 /* Analytics Page Responsive Row */
 .analytics-grid-row {
   display: flex;

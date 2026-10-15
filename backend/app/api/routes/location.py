@@ -137,7 +137,7 @@ async def sos_live_location(
                     "location.latitude": location.latitude,
                     "location.longitude": location.longitude,
                     "location.formatted_address": geo.get("formatted_address"),
-                    "location.address": geo,
+                    "location.address": geo.get("formatted_address") or geo.get("display_name", ""),
                     "location.last_updated": now,
                 }},
                 sort=[("created_at", -1)]
