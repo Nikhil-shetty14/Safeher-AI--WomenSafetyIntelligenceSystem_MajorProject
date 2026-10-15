@@ -1,12 +1,25 @@
-# 🛡️ SafeHer AI — Women Safety Intelligence System
+# 🛡️ SafeHer AI — AI Powered Women Safety Intelligence System
 
-> **An AI-powered, real-time Women Safety Platform built for quick response, intelligent threat analysis, and continuous monitoring.**
-> 
-> **Tech Stack:** React Native · FastAPI · MongoDB · Socket.IO · GPT-4 · Whisper
-
-![SafeHer AI Banner](https://via.placeholder.com/1000x300.png?text=SafeHer+AI+-+Women+Safety+Platform)
-
----
+<p align="center">
+  <img src="public/home.png" width="30%" />
+  <img src="public/soss.png" width="30%" />
+  <img src="public/sose.png" width="30%" />
+</p>
+<p align="center">
+  <img src="public/map.png" width="30%" />
+  <img src="public/timer.png" width="30%" />
+  <img src="public/profile.png" width="30%" />
+</p>
+<p align="center">
+  <img src="public/sosh.png" width="30%" />
+  <img src="public/chat.png" width="30%" />
+  <img src="public/cont.png" width="30%" />
+</p>
+<p align="center">
+  <img src="public/compl.png" width="30%" />
+  <img src="public/pro1.png" width="30%" />
+  <img src="public/pro2.png" width="30%" />
+</p>
 
 ## 🌟 Key Features
 
